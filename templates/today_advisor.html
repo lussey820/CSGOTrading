@@ -6,7 +6,7 @@
   <div class="page-head">
     <div>
       <h1>今日建议</h1>
-      <p class="sub">基于库存饰品,先截图 K线+走势图(预热),再跑分析 pipeline 输出补仓/离场/继续持有建议。</p>
+      <p class="sub">针对你持有的饰品,AI 会分析价格走势,然后给出买入、卖出或持有的建议。</p>
     </div>
     <div class="flex gap-3">
       <button id="btn-refresh" class="btn btn-ghost">刷新</button>
@@ -17,7 +17,7 @@
   <!-- Warmup status -->
   <div class="glass">
     <div class="card-title">
-      <h2>截图预热状态</h2>
+      <h2>行情数据准备</h2>
       <span id="warmup-badge" class="badge badge-hold">-</span>
     </div>
     <div class="progress-track">
@@ -31,10 +31,10 @@
 
   <!-- Run status -->
   <div id="run-card" class="glass" style="display:none;">
-    <h2 class="card-title">分析运行状态</h2>
+    <h2 class="card-title">分析进度</h2>
     <div class="space-y-1 text-sm" style="color:var(--text-2);">
-      <div>阶段: <span id="run-phase" class="mono"></span></div>
-      <div>当前饰品: <span id="run-current" class="mono"></span></div>
+      <div>当前步骤: <span id="run-phase" class="mono"></span></div>
+      <div>正在分析: <span id="run-current" class="mono"></span></div>
       <div>进度: <span id="run-progress">0 / 0</span></div>
       <div>结果: <span id="run-result" class="mono"></span></div>
       <div id="run-error" class="down" style="display:none;"></div>
@@ -190,16 +190,15 @@ function renderWarmup(w) {
   }
   const pct = total ? Math.round(done / total * 100) : 0;
   document.getElementById('warmup-bar').style.width = pct + '%';
-  const skipped = w.state ? (w.state.items_skipped || 0) : 0;
   document.getElementById('warmup-text').textContent =
-    '总 ' + total + ' · 完成 ' + done + ' · 待处理 ' + (w.pending || 0) +
-    ' · 跳过 ' + skipped + ' · 错误 ' + (w.errors || 0);
+    '共 ' + total + ' 个 · 已准备 ' + done + ' · 等待 ' + (w.pending || 0) +
+    ' · 失败 ' + (w.errors || 0);
   const badge = document.getElementById('warmup-badge');
   if (!total) { badge.textContent = '库存为空'; badge.className = 'badge badge-hold'; }
-  else if (w.ready) { badge.textContent = '就绪'; badge.className = 'badge badge-bullish'; }
-  else if (inProgress) { badge.textContent = '预热中'; badge.className = 'badge badge-neutral'; }
-  else if (w.errors > 0) { badge.textContent = '部分错误'; badge.className = 'badge badge-bearish'; }
-  else { badge.textContent = '待预热'; badge.className = 'badge badge-neutral'; }
+  else if (w.ready) { badge.textContent = '已就绪'; badge.className = 'badge badge-bullish'; }
+  else if (inProgress) { badge.textContent = '准备中'; badge.className = 'badge badge-neutral'; }
+  else if (w.errors > 0) { badge.textContent = '部分失败'; badge.className = 'badge badge-bearish'; }
+  else { badge.textContent = '等待准备'; badge.className = 'badge badge-neutral'; }
 
   const box = document.getElementById('warmup-items');
   box.innerHTML = '';

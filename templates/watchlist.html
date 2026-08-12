@@ -5,8 +5,7 @@
     <div>
       <h1>关注列表</h1>
       <p class="sub">
-        添加 CS2
-        饰品市场名称（market_hash_name），添加时会自动校验市场数据是否可用。
+        添加你想让 AI 关注的饰品,添加时会自动检查能否获取到价格数据。
       </p>
     </div>
   </div>
@@ -25,10 +24,7 @@
         添加饰品
       </button>
     </form>
-    <p class="hint">
-      提示：精确匹配 Steam Community Market 上的
-      market_hash_name（含括号、磨损等级）。
-    </p>
+    <p class="hint">提示：请输入饰品在市场上的完整名称（含括号、磨损等级）。</p>
   </div>
 
   <!-- List -->
@@ -84,9 +80,7 @@
 
   <!-- Reference -->
   <div class="glass">
-    <h3 style="margin: 0 0 10px; font-size: 15px">
-      如何获取正确的 market_hash_name
-    </h3>
+    <h3 style="margin: 0 0 10px; font-size: 15px">怎么找到饰品的完整名称</h3>
     <ol
       class="text-sm"
       style="
@@ -109,117 +103,117 @@
           >AK-47 | Redline (Field-Tested)</code
         >
       </li>
-      <li>系统通过 SteamDT API 校验能否获取到该饰品的K线数据</li>
+      <li>系统会自动检查能否获取到该饰品的价格走势数据</li>
     </ol>
   </div>
 </div>
 {% endblock %} {% block scripts %}
 <script>
-    const form = document.getElementById('add-form');
-    const input = document.getElementById('item-name');
-    const btnAdd = document.getElementById('btn-add');
-    const btnClear = document.getElementById('btn-clear');
+      const form = document.getElementById('add-form');
+      const input = document.getElementById('item-name');
+      const btnAdd = document.getElementById('btn-add');
+      const btnClear = document.getElementById('btn-clear');
 
-    async function addItem(name) {
-      btnAdd.disabled = true;
-      btnAdd.textContent = '校验中...';
-      try {
-        // 添加前自动校验市场数据是否可用
-        const v = await fetchJSON('/api/watchlist/verify', {
-          method: 'POST',
-          body: JSON.stringify({ name }),
-        });
-        if (!v.ok || !v.valid) {
-          showToast(v.ok ? `✗ 未找到市场数据: ${name}` : (v.error || '校验失败'), 'error');
-          return;
+      async function addItem(name) {
+        btnAdd.disabled = true;
+        btnAdd.textContent = '校验中...';
+        try {
+          // 添加前自动校验市场数据是否可用
+          const v = await fetchJSON('/api/watchlist/verify', {
+            method: 'POST',
+            body: JSON.stringify({ name }),
+          });
+          if (!v.ok || !v.valid) {
+            showToast(v.ok ? `✗ 未找到市场数据: ${name}` : (v.error || '校验失败'), 'error');
+            return;
+          }
+          btnAdd.textContent = '添加中...';
+          const r = await fetchJSON('/api/watchlist/add', {
+            method: 'POST',
+            body: JSON.stringify({ name }),
+          });
+          if (r.ok) {
+            showToast(`已添加: ${name}`, 'success');
+            setTimeout(() => location.reload(), 800);
+          } else {
+            showToast(r.error || '添加失败', 'error');
+          }
+        } catch (e) {
+          showToast(e.message, 'error');
+        } finally {
+          btnAdd.disabled = false;
+          btnAdd.textContent = '添加饰品';
         }
-        btnAdd.textContent = '添加中...';
-        const r = await fetchJSON('/api/watchlist/add', {
-          method: 'POST',
-          body: JSON.stringify({ name }),
-        });
-        if (r.ok) {
-          showToast(`已添加: ${name}`, 'success');
-          setTimeout(() => location.reload(), 800);
-        } else {
-          showToast(r.error || '添加失败', 'error');
-        }
-      } catch (e) {
-        showToast(e.message, 'error');
-      } finally {
-        btnAdd.disabled = false;
-        btnAdd.textContent = '添加饰品';
       }
-    }
 
-    async function verifyItem(name) {
-      showToast(`校验中: ${name} ...`, 'info');
-      try {
-        const r = await fetchJSON('/api/watchlist/verify', {
-          method: 'POST',
-          body: JSON.stringify({ name }),
-        });
-        if (r.ok) {
-          showToast(r.valid ? `✓ 市场数据可用: ${name}` : `✗ 未找到市场数据: ${name}`, r.valid ? 'success' : 'error');
-        } else {
-          showToast(r.error || '校验失败', 'error');
+      async function verifyItem(name) {
+        showToast(`校验中: ${name} ...`, 'info');
+        try {
+          const r = await fetchJSON('/api/watchlist/verify', {
+            method: 'POST',
+            body: JSON.stringify({ name }),
+          });
+          if (r.ok) {
+            showToast(r.valid ? `✓ 市场数据可用: ${name}` : `✗ 未找到市场数据: ${name}`, r.valid ? 'success' : 'error');
+          } else {
+            showToast(r.error || '校验失败', 'error');
+          }
+        } catch (e) {
+          showToast(e.message, 'error');
         }
-      } catch (e) {
-        showToast(e.message, 'error');
       }
-    }
 
-    async function removeItem(name) {
-      if (!confirm(`确认移除 "${name}"?`)) return;
-      try {
-        const r = await fetchJSON('/api/watchlist/remove', {
-          method: 'POST',
-          body: JSON.stringify({ name }),
-        });
-        if (r.ok) {
-          showToast(`已移除: ${name}`, 'success');
-          setTimeout(() => location.reload(), 600);
-        } else {
-          showToast(r.error || '移除失败', 'error');
+      async function removeItem(name) {
+        if (!confirm(`确认移除 "${name}"?`)) return;
+        try {
+          const r = await fetchJSON('/api/watchlist/remove', {
+            method: 'POST',
+            body: JSON.stringify({ name }),
+          });
+          if (r.ok) {
+            showToast(`已移除: ${name}`, 'success');
+            setTimeout(() => location.reload(), 600);
+          } else {
+            showToast(r.error || '移除失败', 'error');
+          }
+        } catch (e) {
+          showToast(e.message, 'error');
         }
-      } catch (e) {
-        showToast(e.message, 'error');
       }
+
+  form.addEventListener('submit', e => {
+    e.preventDefault();
+    const name = input.value.trim();
+    if (!name) {
+      showToast('请输入饰品名称', 'error');
+      return;
     }
+    addItem(name);
+  });
 
-form.addEventListener('submit', e => {
-  e.preventDefault();
-  const name = input.value.trim();
-  if (!name) {
-    showToast('请输入饰品名称', 'error');
-    return;
-  }
-  addItem(name);
-});
+  document.querySelectorAll('.verify-btn').forEach(btn => {
+    btn.addEventListener('click', () => verifyItem(btn.dataset.name));
+  });
 
-document.querySelectorAll('.verify-btn').forEach(btn => {
-  btn.addEventListener('click', () => verifyItem(btn.dataset.name));
-});
+  document.querySelectorAll('.remove-btn').forEach(btn => {
+    btn.addEventListener('click', () => removeItem(btn.dataset.name));
+  });
 
-document.querySelectorAll('.remove-btn').forEach(btn => {
-  btn.addEventListener('click', () => removeItem(btn.dataset.name));
-});
-
-btnClear.addEventListener('click', async () => {
-  if (!confirm('确认清空关注列表？此操作不可撤销。')) return;
-  try {
-    const tickers = {{ watchlist|tojson|safe }};
-    for (const t of tickers) {
-      await fetchJSON('/api/watchlist/remove', {
-        method: 'POST',
-        body: JSON.stringify({ name: t }),
-      });
+  btnClear.addEventListener('click', async () => {
+    if (!confirm('确认清空关注列表？此操作不可撤销。')) return;
+    try {
+      const tickers = {{ watchlist|tojson|safe }};
+      for (const t of tickers) {
+        await fetchJSON('/api/watchlist/remove', {
+          method: 'POST',
+          body: JSON.stringify({ name: t }),
+        });
+      }
+      showToast('已清空', 'success');
+      setTimeout(() => location.reload(), 600);
+    } catch (e) {
+      showToast(e.message, 'error');
     }
-    showToast('已清空', 'success');
-    setTimeout(() => location.reload(), 600);
-  } catch (e) {
-    showToast(e.message, 'error');
-  }
-});
+  });
 </script>
 {% endblock %}
