@@ -21,8 +21,17 @@
         autocomplete="off"
       />
       <button type="submit" id="btn-add" class="btn btn-primary">
-        添加饰品
+        手动添加
       </button>
+      <button type="button" id="btn-scan" class="btn btn-ghost">
+        扫码识别
+      </button>
+      <input
+        id="scan-file"
+        type="file"
+        accept="image/*"
+        style="display: none"
+      />
     </form>
     <p class="hint">提示：请输入饰品在市场上的完整名称（含括号、磨损等级）。</p>
   </div>
@@ -107,99 +116,110 @@
     </ol>
   </div>
 </div>
+
+<!-- 扫码识别候选弹窗 -->
+<div id="scan-modal" class="scan-modal" style="display: none">
+  <div class="scan-modal-box">
+    <div class="card-title">
+      <h3>选择识别到的饰品</h3>
+      <button id="scan-close" class="btn btn-ghost btn-sm">关闭</button>
+    </div>
+    <div id="scan-candidates"></div>
+  </div>
+</div>
 {% endblock %} {% block scripts %}
 <script>
-      const form = document.getElementById('add-form');
-      const input = document.getElementById('item-name');
-      const btnAdd = document.getElementById('btn-add');
-      const btnClear = document.getElementById('btn-clear');
+        const form = document.getElementById('add-form');
+        const input = document.getElementById('item-name');
+        const btnAdd = document.getElementById('btn-add');
+        const btnClear = document.getElementById('btn-clear');
 
-      async function addItem(name) {
-        btnAdd.disabled = true;
-        btnAdd.textContent = '校验中...';
-        try {
-          // 添加前自动校验市场数据是否可用
-          const v = await fetchJSON('/api/watchlist/verify', {
-            method: 'POST',
-            body: JSON.stringify({ name }),
-          });
-          if (!v.ok || !v.valid) {
-            showToast(v.ok ? `✗ 未找到市场数据: ${name}` : (v.error || '校验失败'), 'error');
-            return;
+        async function addItem(name) {
+          btnAdd.disabled = true;
+          btnAdd.textContent = '校验中...';
+          try {
+            // 添加前自动校验市场数据是否可用
+            const v = await fetchJSON('/api/watchlist/verify', {
+              method: 'POST',
+              body: JSON.stringify({ name }),
+            });
+            if (!v.ok || !v.valid) {
+              showToast(v.ok ? `✗ 未找到市场数据: ${name}` : (v.error || '校验失败'), 'error');
+              return;
+            }
+            btnAdd.textContent = '添加中...';
+            const r = await fetchJSON('/api/watchlist/add', {
+              method: 'POST',
+              body: JSON.stringify({ name }),
+            });
+            if (r.ok) {
+              showToast(`已添加: ${name}`, 'success');
+              setTimeout(() => location.reload(), 800);
+            } else {
+              showToast(r.error || '添加失败', 'error');
+            }
+          } catch (e) {
+            showToast(e.message, 'error');
+          } finally {
+            btnAdd.disabled = false;
+            btnAdd.textContent = '添加饰品';
           }
-          btnAdd.textContent = '添加中...';
-          const r = await fetchJSON('/api/watchlist/add', {
-            method: 'POST',
-            body: JSON.stringify({ name }),
-          });
-          if (r.ok) {
-            showToast(`已添加: ${name}`, 'success');
-            setTimeout(() => location.reload(), 800);
-          } else {
-            showToast(r.error || '添加失败', 'error');
-          }
-        } catch (e) {
-          showToast(e.message, 'error');
-        } finally {
-          btnAdd.disabled = false;
-          btnAdd.textContent = '添加饰品';
         }
-      }
 
-      async function verifyItem(name) {
-        showToast(`校验中: ${name} ...`, 'info');
-        try {
-          const r = await fetchJSON('/api/watchlist/verify', {
-            method: 'POST',
-            body: JSON.stringify({ name }),
-          });
-          if (r.ok) {
-            showToast(r.valid ? `✓ 市场数据可用: ${name}` : `✗ 未找到市场数据: ${name}`, r.valid ? 'success' : 'error');
-          } else {
-            showToast(r.error || '校验失败', 'error');
+        async function verifyItem(name) {
+          showToast(`校验中: ${name} ...`, 'info');
+          try {
+            const r = await fetchJSON('/api/watchlist/verify', {
+              method: 'POST',
+              body: JSON.stringify({ name }),
+            });
+            if (r.ok) {
+              showToast(r.valid ? `✓ 市场数据可用: ${name}` : `✗ 未找到市场数据: ${name}`, r.valid ? 'success' : 'error');
+            } else {
+              showToast(r.error || '校验失败', 'error');
+            }
+          } catch (e) {
+            showToast(e.message, 'error');
           }
-        } catch (e) {
-          showToast(e.message, 'error');
         }
-      }
 
-      async function removeItem(name) {
-        if (!confirm(`确认移除 "${name}"?`)) return;
-        try {
-          const r = await fetchJSON('/api/watchlist/remove', {
-            method: 'POST',
-            body: JSON.stringify({ name }),
-          });
-          if (r.ok) {
-            showToast(`已移除: ${name}`, 'success');
-            setTimeout(() => location.reload(), 600);
-          } else {
-            showToast(r.error || '移除失败', 'error');
+        async function removeItem(name) {
+          if (!confirm(`确认移除 "${name}"?`)) return;
+          try {
+            const r = await fetchJSON('/api/watchlist/remove', {
+              method: 'POST',
+              body: JSON.stringify({ name }),
+            });
+            if (r.ok) {
+              showToast(`已移除: ${name}`, 'success');
+              setTimeout(() => location.reload(), 600);
+            } else {
+              showToast(r.error || '移除失败', 'error');
+            }
+          } catch (e) {
+            showToast(e.message, 'error');
           }
-        } catch (e) {
-          showToast(e.message, 'error');
         }
+
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const name = input.value.trim();
+      if (!name) {
+        showToast('请输入饰品名称', 'error');
+        return;
       }
+      addItem(name);
+    });
 
-  form.addEventListener('submit', e => {
-    e.preventDefault();
-    const name = input.value.trim();
-    if (!name) {
-      showToast('请输入饰品名称', 'error');
-      return;
-    }
-    addItem(name);
-  });
+    document.querySelectorAll('.verify-btn').forEach(btn => {
+      btn.addEventListener('click', () => verifyItem(btn.dataset.name));
+    });
 
-  document.querySelectorAll('.verify-btn').forEach(btn => {
-    btn.addEventListener('click', () => verifyItem(btn.dataset.name));
-  });
+    document.querySelectorAll('.remove-btn').forEach(btn => {
+      btn.addEventListener('click', () => removeItem(btn.dataset.name));
+    });
 
-  document.querySelectorAll('.remove-btn').forEach(btn => {
-    btn.addEventListener('click', () => removeItem(btn.dataset.name));
-  });
-
-  btnClear.addEventListener('click', async () => {
+    btnClear.addEventListener('click', async () => {
     if (!confirm('确认清空关注列表？此操作不可撤销。')) return;
     try {
       const tickers = {{ watchlist|tojson|safe }};
@@ -214,6 +234,63 @@
     } catch (e) {
       showToast(e.message, 'error');
     }
+  });
+
+  // ---- 扫码识别 ----
+  const btnScan = document.getElementById('btn-scan');
+  const scanFile = document.getElementById('scan-file');
+  const scanModal = document.getElementById('scan-modal');
+
+  async function uploadImage(file) {
+    const fd = new FormData();
+    fd.append('image', file);
+    const res = await fetch('/api/scan/recognize', { method: 'POST', body: fd });
+    let data = {};
+    try { data = await res.json(); } catch (e) {}
+    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    return data;
+  }
+
+  function renderCandidates(cands, query) {
+    const box = document.getElementById('scan-candidates');
+    box.innerHTML = '';
+    if (!cands.length) {
+      box.innerHTML = '<div class="empty">未匹配到饰品。识别到的名称: ' + escapeHtml(query || '(空)') + '</div>';
+    } else {
+      for (const c of cands) {
+        const el = document.createElement('div');
+        el.className = 'scan-cand';
+        el.innerHTML = `
+          <div style="min-width:0;">
+            <div class="text-sm" style="color:var(--text-1);">${escapeHtml(c.name || c.marketHashName)}</div>
+            <div class="mono text-xs muted truncate">${escapeHtml(c.marketHashName)}</div>
+          </div>
+          <button class="btn btn-primary btn-sm pick-cand" data-name="${escapeHtml(c.marketHashName)}">添加</button>`;
+        box.appendChild(el);
+      }
+      box.querySelectorAll('.pick-cand').forEach(b => b.addEventListener('click', () => {
+        scanModal.style.display = 'none';
+        addItem(b.dataset.name);
+      }));
+    }
+    scanModal.style.display = '';
+  }
+
+  btnScan.addEventListener('click', () => scanFile.click());
+  scanFile.addEventListener('change', async () => {
+    const f = scanFile.files[0];
+    scanFile.value = '';
+    if (!f) return;
+    showToast('正在识别图片...', 'info');
+    try {
+      const r = await uploadImage(f);
+      renderCandidates(r.candidates || [], r.query || '');
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  });
+  document.getElementById('scan-close').addEventListener('click', () => {
+    scanModal.style.display = 'none';
   });
 </script>
 {% endblock %}

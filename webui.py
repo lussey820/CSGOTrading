@@ -37,6 +37,8 @@ from flask import (
 from database.cs2_sqlite_setup import CS2_DB_PATH
 from watchlist import load_watchlist, save_watchlist, verify_item
 from apis.cs2market.chart_screenshot import DEFAULT_SCREENSHOT_DIR, _safe_filename
+from apis.ocr import recognize_item_name
+from apis.cs2market.item_search import search_items
 from util.logger import logger
 import inventory as inventory_mod
 import today_advisor as advisor_mod
@@ -270,6 +272,35 @@ def ai_trader_page():
 
 
 # ----------------- JSON APIs -----------------
+
+@app.route("/api/scan/recognize", methods=["POST"])
+def api_scan_recognize():
+    """扫码识别:上传饰品图片 → 阿里 OCR 识别名称 → SteamDT 搜索匹配候选。
+
+    body: multipart/form-data,字段 image=图片文件
+    """
+    file = request.files.get("image")
+    if not file or not file.filename:
+        return jsonify({"ok": False, "error": "请选择要识别的图片"}), 400
+    image_bytes = file.read()
+    if not image_bytes:
+        return jsonify({"ok": False, "error": "图片内容为空"}), 400
+    if len(image_bytes) > 10 * 1024 * 1024:
+        return jsonify({"ok": False, "error": "图片过大(超过 10MB)"}), 400
+    try:
+        query = recognize_item_name(image_bytes)
+    except Exception as e:
+        logger.error(f"scan: OCR failed: {e}")
+        return jsonify({"ok": False, "error": f"文字识别失败: {e}"}), 500
+    if not query:
+        return jsonify({"ok": False, "error": "未识别到饰品名称,请换一张更清晰的图片"}), 422
+    try:
+        candidates = search_items(query)
+    except Exception as e:
+        logger.error(f"scan: search failed: {e}")
+        return jsonify({"ok": False, "query": query, "error": f"搜索失败: {e}"}), 502
+    return jsonify({"ok": True, "query": query, "candidates": candidates})
+
 
 @app.route("/api/watchlist", methods=["GET"])
 def api_watchlist_get():

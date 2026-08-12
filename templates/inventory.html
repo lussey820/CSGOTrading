@@ -10,7 +10,9 @@
     </div>
     <div class="flex gap-3">
       <button id="btn-refresh-market" class="btn btn-ghost">刷新最新价格</button>
-      <button id="btn-add-open" class="btn btn-primary">添加饰品</button>
+      <button id="btn-add-open" class="btn btn-primary">手动添加</button>
+      <button id="btn-scan" class="btn btn-ghost">扫码识别</button>
+      <input id="scan-file" type="file" accept="image/*" style="display:none;" />
     </div>
   </div>
 
@@ -99,7 +101,18 @@
         <tbody id="inv-tbody"></tbody>
       </table>
     </div>
-    <div id="empty-hint" class="empty" style="display:none;">库存为空,点击「添加饰品」开始</div>
+    <div id="empty-hint" class="empty" style="display:none;">库存为空,点击「手动添加」开始</div>
+  </div>
+</div>
+
+<!-- 扫码识别候选弹窗 -->
+<div id="scan-modal" class="scan-modal" style="display:none;">
+  <div class="scan-modal-box">
+    <div class="card-title">
+      <h3>选择识别到的饰品</h3>
+      <button id="scan-close" class="btn btn-ghost btn-sm">关闭</button>
+    </div>
+    <div id="scan-candidates"></div>
   </div>
 </div>
 {% endblock %}
@@ -240,6 +253,65 @@ async function editItem(id) {
 }
 
 document.getElementById('btn-refresh-market').addEventListener('click', () => loadInventory(true));
+
+// ---- 扫码识别:识别后自动填入饰品名,再补数量/价格/日期 ----
+const btnScan = document.getElementById('btn-scan');
+const scanFile = document.getElementById('scan-file');
+const scanModal = document.getElementById('scan-modal');
+
+async function uploadImage(file) {
+  const fd = new FormData();
+  fd.append('image', file);
+  const res = await fetch('/api/scan/recognize', { method: 'POST', body: fd });
+  let data = {};
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  return data;
+}
+
+function renderCandidates(cands, query) {
+  const box = document.getElementById('scan-candidates');
+  box.innerHTML = '';
+  if (!cands.length) {
+    box.innerHTML = '<div class="empty">未匹配到饰品。识别到的名称: ' + escapeHtml(query || '(空)') + '</div>';
+  } else {
+    for (const c of cands) {
+      const el = document.createElement('div');
+      el.className = 'scan-cand';
+      el.innerHTML = `
+        <div style="min-width:0;">
+          <div class="text-sm" style="color:var(--text-1);">${escapeHtml(c.name || c.marketHashName)}</div>
+          <div class="mono text-xs muted truncate">${escapeHtml(c.marketHashName)}</div>
+        </div>
+        <button class="btn btn-primary btn-sm pick-cand" data-name="${escapeHtml(c.marketHashName)}">选择</button>`;
+      box.appendChild(el);
+    }
+    box.querySelectorAll('.pick-cand').forEach(b => b.addEventListener('click', () => {
+      // 填入名称并打开添加面板,数量/价格/日期由用户补填
+      document.getElementById('f-name').value = b.dataset.name;
+      addPanel.style.display = '';
+      scanModal.style.display = 'none';
+    }));
+  }
+  scanModal.style.display = '';
+}
+
+btnScan.addEventListener('click', () => scanFile.click());
+scanFile.addEventListener('change', async () => {
+  const f = scanFile.files[0];
+  scanFile.value = '';
+  if (!f) return;
+  showToast('正在识别图片...', 'info');
+  try {
+    const r = await uploadImage(f);
+    renderCandidates(r.candidates || [], r.query || '');
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+});
+document.getElementById('scan-close').addEventListener('click', () => {
+  scanModal.style.display = 'none';
+});
 
 // Initial load: fast (no market) first, then refresh with market
 loadInventory(false).then(() => loadInventory(true));
