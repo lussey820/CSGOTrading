@@ -46,6 +46,10 @@ class Position(BaseModel):
         default=0,
         description="Shares for the position."
     )
+    avg_cost: float = Field(
+        default=0.0,
+        description="加权平均持仓成本(每份),用于计算浮盈浮亏与卖出结算。"
+    )
 
 class PositionRisk(BaseModel):
     """Risk assessment for a single ticker"""
