@@ -84,12 +84,17 @@ def portfolio_agent(state: FundState):
     decision_memory = db.get_decision_memory(exp_name, ticker, thresholds["decision_memory_limit"])
     current_shares, tradable_shares = calculate_ticker_shares(portfolio, current_price, ticker, position_risk.optimal_position_ratio)
 
+    # 持仓成本(加权平均),无持仓时为 0
+    pos = portfolio.positions.get(ticker)
+    avg_cost = pos.avg_cost if pos else 0.0
+
     # make trading decision
     if enable_transaction_fee:
         prompt = PORTFOLIO_PROMPT.format(
             decision_memory=decision_memory,
             current_price=current_price,
             current_shares=current_shares,
+            avg_cost=avg_cost,
             tradable_shares=tradable_shares,
             transaction_fee_rate=TRANSACTION_FEE_RATE,
             transaction_fee_rate_pct=TRANSACTION_FEE_RATE * 100,
@@ -100,6 +105,7 @@ def portfolio_agent(state: FundState):
             decision_memory=decision_memory,
             current_price=current_price,
             current_shares=current_shares,
+            avg_cost=avg_cost,
             tradable_shares=tradable_shares,
         )
 
