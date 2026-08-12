@@ -87,6 +87,11 @@ def portfolio_agent(state: FundState):
     # 持仓成本(加权平均),无持仓时为 0
     pos = portfolio.positions.get(ticker)
     avg_cost = pos.avg_cost if pos else 0.0
+    # 浮盈/浮亏百分比(正=盈利,负=亏损),无成本时为 0
+    floating_pnl_pct = (
+        round((current_price - avg_cost) / avg_cost * 100.0, 2)
+        if avg_cost and avg_cost > 0 else 0.0
+    )
 
     # make trading decision
     if enable_transaction_fee:
@@ -95,6 +100,7 @@ def portfolio_agent(state: FundState):
             current_price=current_price,
             current_shares=current_shares,
             avg_cost=avg_cost,
+            floating_pnl_pct=floating_pnl_pct,
             tradable_shares=tradable_shares,
             transaction_fee_rate=TRANSACTION_FEE_RATE,
             transaction_fee_rate_pct=TRANSACTION_FEE_RATE * 100,
@@ -106,6 +112,7 @@ def portfolio_agent(state: FundState):
             current_price=current_price,
             current_shares=current_shares,
             avg_cost=avg_cost,
+            floating_pnl_pct=floating_pnl_pct,
             tradable_shares=tradable_shares,
         )
 

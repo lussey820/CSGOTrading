@@ -151,6 +151,7 @@ Decision memory:
 Current Price: {current_price}
 Holding Shares: {current_shares}
 Average Cost (持仓成本): {avg_cost}
+Floating P&L (浮盈/浮亏%): {floating_pnl_pct}
 Tradable Shares: {tradable_shares}
 
 Trading friction: selling fee {transaction_fee_rate_pct:.2f}% (applies to sells only).
@@ -158,7 +159,7 @@ Trading friction: selling fee {transaction_fee_rate_pct:.2f}% (applies to sells 
 Rules:
 - If tradable_shares > 0: you may buy (no fee on buy).
 - If tradable_shares < 0: you may sell; ensure expected downside risk outweighs sell fee.
-- If tradable_shares ≈ 0 or expected gain < sell-fee impact: choose Hold.
+- If tradable_shares ≈ 0: default to Hold, BUT if the floating loss is significant (e.g. ≥15%) and signals remain bearish, a stop-loss Sell may be justified to cut losses — weigh the remaining downside against the {transaction_fee_rate_pct:.2f}% sell fee before deciding.
 - Compare current price against your average cost: if current price < avg_cost you hold a floating loss; factor this into Buy/Hold/Sell.
 - Ensure expected profit after (sell) fees is positive; otherwise Hold.
 
@@ -180,12 +181,13 @@ Decision memory:
 Current Price: {current_price}
 Holding Shares: {current_shares}
 Average Cost (持仓成本): {avg_cost}
+Floating P&L (浮盈/浮亏%): {floating_pnl_pct}
 Tradable Shares: {tradable_shares}
 
 Rules:
 - If tradable_shares > 0: you may buy.
 - If tradable_shares < 0: you may sell.
-- If tradable_shares ≈ 0: choose Hold.
+- If tradable_shares ≈ 0: default to Hold, BUT if the floating loss is significant (e.g. ≥15%) and signals remain bearish, a stop-loss Sell may be justified to cut losses.
 - Compare current price against your average cost: if current price < avg_cost you hold a floating loss; factor this into your decision.
 
 You must provide your decision as a structured output with the following fields:
