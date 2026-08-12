@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% block title %}AI持仓 · CS2 交易助手{% endblock %}
+
+{% block content %}
+<div class="page-gap">
+  <div class="page-head">
+    <div>
+      <h1>AI 持仓盈亏</h1>
+      <p class="sub">机器人决策为 Sell 时按 SteamDT 实时价结算已实现盈亏(扣 2% 手续费);未实现盈亏来自库存实时估值。</p>
+    </div>
+    <div class="flex gap-3">
+      <button id="btn-ai-run" class="btn">运行 AI 账户</button>
+      <button id="btn-refresh" class="btn btn-ghost">刷新</button>
+    </div>
+  </div>
+
+  <!-- KPI -->
+  <div class="kpi-grid">
+    <div class="glass">
+      <div class="kpi-label">已实现盈亏</div>
+      <div id="kpi-realized" class="kpi-value">¥0.00</div>
+      <div class="kpi-sub">交易笔数: <span id="kpi-trades">0</span></div>
+    </div>
+    <div class="glass">
+      <div class="kpi-label">未实现盈亏</div>
+      <div id="kpi-unrealized" class="kpi-value">¥0.00</div>
+      <div class="kpi-sub">基于库存实时价</div>
+    </div>
+    <div class="glass">
+      <div class="kpi-label">总盈亏</div>
+      <div id="kpi-total" class="kpi-value">¥0.00</div>
+      <div class="kpi-sub">已实现 + 未实现</div>
+    </div>
+    <div class="glass">
+      <div class="kpi-label">累计手续费</div>
+      <div id="kpi-fee" class="kpi-value">¥0.00</div>
+      <div class="kpi-sub">2% / 笔</div>
+    </div>
+  </div>
+
+  <!-- Holdings -->
+  <div class="glass">
+    <div class="card-title">
+      <h2>当前持仓 + 未实现盈亏</h2>
+    </div>
+    <div class="table-wrap">
+      <table class="glass-table">
+        <thead>
+          <tr>
+            <th>饰品</th>
+            <th class="num">数量</th>
+            <th class="num">买入价</th>
+            <th class="num">当前价</th>
+            <th class="num">未实现盈亏</th>
+            <th class="num">收益率</th>
+          </tr>
+        </thead>
+        <tbody id="holdings-tbody"></tbody>
+      </table>
+    </div>
+    <div id="holdings-empty" class="empty" style="display:none;">库存为空</div>
+  </div>
+
+  <!-- Per-item realized -->
+  <div class="glass">
+    <div class="card-title">
+      <h2>每饰品已实现盈亏</h2>
+    </div>
+    <div class="table-wrap">
+      <table class="glass-table">
+        <thead>
+          <tr>
+            <th>饰品</th>
+            <th class="num">交易笔数</th>
+            <th class="num">卖出总数</th>
+            <th class="num">已实现盈亏</th>
+            <th class="num">累计手续费</th>
+            <th class="num">最近卖出日</th>
+          </tr>
+        </thead>
+        <tbody id="per-item-tbody"></tbody>
+      </table>
+    </div>
+    <div id="per-item-empty" class="empty" style="display:none;">尚无卖出记录</div>
+  </div>
+
+  <!-- Trades detail -->
+  <div class="glass">
+    <div class="card-title">
+      <h2>交易明细</h2>
+    </div>
+    <div class="table-wrap">
+      <table class="glass-table">
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>饰品</th>
+            <th class="num">数量</th>
+            <th class="num">买入价</th>
+            <th class="num">卖出价</th>
+            <th class="num">手续费</th>
+            <th class="num">已实现盈亏</th>
+            <th>关联决策</th>
+          </tr>
+        </thead>
+        <tbody id="trades-tbody"></tbody>
+      </table>
+    </div>
+    <div id="trades-empty" class="empty" style="display:none;">尚无交易记录</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadAll() {
+  try {
+    const r = await fetchJSON('/api/ai-trader');
+    if (!r.ok && r.ok !== undefined) throw new Error(r.error || 'load failed');
+    renderKPI(r);
+    renderHoldings(r.holdings || []);
+    renderPerItem(r.per_item || []);
+    renderTrades(r.trades || []);
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+function renderKPI(r) {
+  const setEl = (id, val, colorVal) => {
+    const el = document.getElementById(id);
+    el.textContent = fmtMoney(val);
+    if (colorVal !== undefined) el.className = 'kpi-value ' + colorClass(colorVal);
+  };
+  setEl('kpi-realized', r.total_realized_pnl, r.total_realized_pnl);
+  setEl('kpi-unrealized', r.total_unrealized_pnl, r.total_unrealized_pnl);
+  setEl('kpi-total', r.total_pnl, r.total_pnl);
+  setEl('kpi-fee', r.total_fee_paid, null);
+  document.getElementById('kpi-trades').textContent = r.trade_count || 0;
+}
+
+function renderHoldings(rows) {
+  const tbody = document.getElementById('holdings-tbody');
+  const empty = document.getElementById('holdings-empty');
+  tbody.innerHTML = '';
+  if (!rows.length) { empty.style.display = ''; return; }
+  empty.style.display = 'none';
+  for (const h of rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="mono">${escapeHtml(h.item_name_cn || h.item_name)}</td>
+      <td class="num">${h.shares}</td>
+      <td class="num">${fmtMoney(h.buy_price)}</td>
+      <td class="num">${h.current_price == null ? '<span class="muted">-</span>' : fmtMoney(h.current_price)}</td>
+      <td class="num ${colorClass(h.unrealized_pnl)}">${fmtMoney(h.unrealized_pnl)}</td>
+      <td class="num ${colorClass(h.unrealized_pnl_pct)}">${fmtPct(h.unrealized_pnl_pct)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function renderPerItem(rows) {
+  const tbody = document.getElementById('per-item-tbody');
+  const empty = document.getElementById('per-item-empty');
+  tbody.innerHTML = '';
+  if (!rows.length) { empty.style.display = ''; return; }
+  empty.style.display = 'none';
+  for (const p of rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="mono">${escapeHtml(p.item_name_cn || p.item_name)}</td>
+      <td class="num">${p.trade_count}</td>
+      <td class="num">${p.total_shares_sold}</td>
+      <td class="num ${colorClass(p.total_realized_pnl)}">${fmtMoney(p.total_realized_pnl)}</td>
+      <td class="num">${fmtMoney(p.total_fee)}</td>
+      <td class="num muted">${p.last_trade_date || '-'}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function renderTrades(rows) {
+  const tbody = document.getElementById('trades-tbody');
+  const empty = document.getElementById('trades-empty');
+  tbody.innerHTML = '';
+  if (!rows.length) { empty.style.display = ''; return; }
+  empty.style.display = 'none';
+  for (const t of rows) {
+    const tr = document.createElement('tr');
+    const decisionShort = t.decision_id ? t.decision_id.slice(0, 8) : '-';
+    tr.innerHTML = `
+      <td class="muted">${t.trade_date || '-'}</td>
+      <td class="mono">${escapeHtml(t.item_name_cn || t.item_name)}</td>
+      <td class="num">${t.shares}</td>
+      <td class="num">${fmtMoney(t.buy_price)}</td>
+      <td class="num">${fmtMoney(t.sell_price)}</td>
+      <td class="num muted">${fmtMoney(t.fee)}</td>
+      <td class="num ${colorClass(t.realized_pnl)}">${fmtMoney(t.realized_pnl)}</td>
+      <td class="mono muted" style="font-size:12px;">${decisionShort}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+document.getElementById('btn-refresh').addEventListener('click', loadAll);
+
+document.getElementById('btn-ai-run').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-ai-run');
+  btn.disabled = true; btn.textContent = '运行中...';
+  try {
+    const r = await fetchJSON('/api/ai-account/run', { method: 'POST', body: '{}' });
+    showToast(r.ok ? 'AI 账户分析已启动(后台运行)' : (r.error || '启动失败'), r.ok ? 'success' : 'error');
+  } catch (e) {
+    showToast('启动失败: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = '运行 AI 账户';
+  }
+});
+
+loadAll();
+</script>
+{% endblock %}

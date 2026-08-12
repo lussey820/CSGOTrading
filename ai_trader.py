@@ -174,6 +174,70 @@ def auto_settle_sell(
 
 # ----------------- query AI trader state -----------------
 
+def _virtual_holdings() -> List[Dict]:
+    """读 AI 虚拟账户(exp_name=ai-account)最新持仓,拉实时价算未实现盈亏。
+
+    返回元素:item_name, item_name_cn, shares, buy_price(=avg_cost),
+    current_price, unrealized_pnl, unrealized_pnl_pct。
+    """
+    try:
+        with _conn() as conn:
+            row = conn.execute(
+                """
+                SELECT p.positions FROM cs2_portfolio p
+                JOIN cs2_config c ON c.id = p.config_id
+                WHERE c.exp_name = 'ai-account'
+                ORDER BY p.updated_at DESC LIMIT 1
+                """
+            ).fetchone()
+    except Exception as e:
+        logger.error(f"ai_trader: load virtual portfolio failed: {e}")
+        row = None
+    if not row:
+        return []
+
+    import json
+    try:
+        positions = json.loads(row["positions"])
+    except (TypeError, ValueError):
+        positions = {}
+
+    holdings = []
+    for name, pos in positions.items():
+        shares = int(pos.get("shares") or 0)
+        if shares <= 0:
+            continue
+        avg_cost = float(pos.get("avg_cost") or 0.0)
+        cur = None
+        try:
+            md = fetch_item_market_data(name)
+            cur = _extract_current_price(md)
+        except Exception as e:
+            logger.error(f"ai_trader: price fetch failed for {name}: {e}")
+        unreal = round((cur - avg_cost) * shares, 2) if cur is not None else None
+        unreal_pct = (
+            round((cur - avg_cost) / avg_cost * 100.0, 2)
+            if cur is not None and avg_cost > 0 else None
+        )
+        holdings.append(
+            {
+                "item_name": name,
+                "item_name_cn": name,
+                "shares": shares,
+                "buy_price": avg_cost,
+                "current_price": cur,
+                "unrealized_pnl": unreal,
+                "unrealized_pnl_pct": unreal_pct,
+            }
+        )
+
+    # 中文名映射(缺失回退英文)
+    cn_map = {it["item_name"]: (it.get("item_name_cn") or it["item_name"]) for it in list_items(with_market=False)}
+    for h in holdings:
+        h["item_name_cn"] = cn_map.get(h["item_name"], h["item_name"])
+    return holdings
+
+
 def get_ai_trader_summary() -> Dict:
     """Return the AI trader overview: per-item trades + cumulative P&L."""
     try:
@@ -191,7 +255,7 @@ def get_ai_trader_summary() -> Dict:
         trades = []
 
     # 中文名映射:从库存表取官方中文名(缺失时回退英文名)
-    inv_items = list_items(with_market=True)
+    inv_items = list_items(with_market=False)
     cn_map = {
         it["item_name"]: (it.get("item_name_cn") or it["item_name"])
         for it in inv_items
@@ -249,23 +313,11 @@ def get_ai_trader_summary() -> Dict:
         agg["total_fee"] = round(agg["total_fee"], 2)
     per_item_list = sorted(per_item.values(), key=lambda x: x["item_name"])
 
-    # merge with current inventory unrealized P&L
-    holdings = []
+    # AI 虚拟账户持仓 + 未实现盈亏(虚拟账户,非真实库存)
+    holdings = _virtual_holdings()
     total_unrealized = 0.0
-    for it in inv_items:
-        unreal = it.get("total_pnl") or 0.0
-        total_unrealized += unreal
-        holdings.append(
-            {
-                "item_name": it["item_name"],
-                "item_name_cn": it.get("item_name_cn") or it["item_name"],
-                "shares": it["shares"],
-                "buy_price": it["buy_price"],
-                "current_price": it.get("current_price"),
-                "unrealized_pnl": unreal,
-                "unrealized_pnl_pct": it.get("total_pnl_pct"),
-            }
-        )
+    for h in holdings:
+        total_unrealized += h["unrealized_pnl"] or 0.0
 
     return {
         "total_realized_pnl": round(total_realized, 2),
