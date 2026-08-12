@@ -1,0 +1,23 @@
+# AI 端虚拟账户配置 - 全自动分析→决策→自动记账
+exp_name: "ai-account"
+
+cashflow: 10000
+
+# tickers 由 ai_account.py 从 config/watchlist.yaml(关注列表)动态注入
+tickers: []
+
+# 技术分析 + 视觉K线图分析(SteamDT 截图 → qwen-vl-plus)
+workflow_analysts:
+  - technical
+  - vision
+
+llm:
+  provider: "DeepSeek"
+  model: "deepseek-chat"
+
+planner_mode: false
+multi_item_mode: true
+enable_transaction_fee: true
+
+# AI 端:卖出决策后自动结算已实现盈亏
+auto_settle: true
