@@ -33,6 +33,21 @@ class AgentWorkflow:
         new_portfolio = self.db.copy_portfolio(config_id, portfolio, config['trading_date'])
         self.init_portfolio = Portfolio(**new_portfolio)
         logger.info(f"New portfolio ID: {self.init_portfolio.id}")
+
+        # 今日建议模式:用真实库存持仓覆盖模拟组合,让决策引擎看到真实持仓(数量+成本)
+        if config.get("seed_from_inventory", False):
+            from inventory import list_items
+            for it in list_items(with_market=False):
+                name = it["item_name"]
+                shares = int(it.get("shares") or 0)
+                pos = self.init_portfolio.positions.setdefault(name, Position())
+                pos.shares = shares
+                pos.value = round(float(it.get("buy_price") or 0) * shares, 2)
+                pos.avg_cost = float(it.get("buy_price") or 0) if shares > 0 else 0.0
+            logger.info(
+                "Seeded portfolio positions from real inventory: "
+                + ", ".join(f"{k}={v.shares}@{v.avg_cost}" for k, v in self.init_portfolio.positions.items())
+            )
         
         # Initialize workflow configuration
         self.planner_mode = config.get('planner_mode', False)
@@ -165,8 +180,15 @@ class AgentWorkflow:
             # There is no transaction fee for purchase
             max_affordable_shares = int(portfolio.cashflow // price) if price > 0 else 0
             actual_shares = min(shares, max_affordable_shares)
-            
-            portfolio.positions[ticker].shares += actual_shares
+
+            old_shares = portfolio.positions[ticker].shares
+            old_cost = portfolio.positions[ticker].avg_cost
+            portfolio.positions[ticker].shares = old_shares + actual_shares
+            # 加权平均成本
+            if old_shares + actual_shares > 0:
+                portfolio.positions[ticker].avg_cost = round(
+                    (old_shares * old_cost + actual_shares * price) / (old_shares + actual_shares), 2
+                )
             portfolio.cashflow -= price * actual_shares
             
             # log limited buy order
