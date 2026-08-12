@@ -10,7 +10,6 @@
     </div>
     <div class="flex gap-3">
       <button id="btn-ai-run" class="btn">运行 AI 账户</button>
-      <button id="btn-refresh" class="btn btn-ghost">刷新</button>
     </div>
   </div>
 
@@ -202,14 +201,40 @@ function renderTrades(rows) {
   }
 }
 
-document.getElementById('btn-refresh').addEventListener('click', loadAll);
+let aiPollTimer = null;
+
+function startAiPolling() {
+  if (aiPollTimer) clearInterval(aiPollTimer);
+  aiPollTimer = setInterval(async () => {
+    try {
+      const s = await fetchJSON('/api/ai-account/status');
+      if (!s.running) {
+        clearInterval(aiPollTimer); aiPollTimer = null;
+        showToast('AI 账户分析已结束', s.last_ok ? 'success' : 'error');
+        await loadAll();
+      }
+    } catch (e) {}
+  }, 5000);
+}
 
 document.getElementById('btn-ai-run').addEventListener('click', async () => {
   const btn = document.getElementById('btn-ai-run');
   btn.disabled = true; btn.textContent = '运行中...';
   try {
+    // 已在运行:转为轮询,结束后自动刷新
+    const st = await fetchJSON('/api/ai-account/status');
+    if (st.running) {
+      showToast('AI 账户运行中,完成后自动刷新', 'info');
+      startAiPolling();
+      return;
+    }
     const r = await fetchJSON('/api/ai-account/run', { method: 'POST', body: '{}' });
-    showToast(r.ok ? 'AI 账户分析已启动(后台运行)' : (r.error || '启动失败'), r.ok ? 'success' : 'error');
+    if (r.ok) {
+      showToast('AI 账户分析已启动(后台运行)', 'success');
+      startAiPolling();
+    } else {
+      showToast(r.error || '启动失败', 'error');
+    }
   } catch (e) {
     showToast('启动失败: ' + e.message, 'error');
   } finally {
