@@ -93,6 +93,15 @@ def portfolio_agent(state: FundState):
         if avg_cost and avg_cost > 0 else 0.0
     )
 
+    # 从分析师信号汇总最近支撑/阻力:支撑取最高(最贴近现价),阻力取最低
+    signals = analyst_signals or []
+    supports = [s.support for s in signals if s is not None and s.support is not None and s.support > 0]
+    resistances = [s.resistance for s in signals if s is not None and s.resistance is not None and s.resistance > 0]
+    nearest_support = max(supports) if supports else None
+    nearest_resistance = min(resistances) if resistances else None
+    # 破位判断:现价跌破最近支撑位
+    broke_support = bool(nearest_support is not None and current_price < nearest_support)
+
     # make trading decision
     if enable_transaction_fee:
         prompt = PORTFOLIO_PROMPT.format(
@@ -101,6 +110,9 @@ def portfolio_agent(state: FundState):
             current_shares=current_shares,
             avg_cost=avg_cost,
             floating_pnl_pct=floating_pnl_pct,
+            nearest_support=nearest_support,
+            nearest_resistance=nearest_resistance,
+            broke_support=broke_support,
             tradable_shares=tradable_shares,
             transaction_fee_rate=TRANSACTION_FEE_RATE,
             transaction_fee_rate_pct=TRANSACTION_FEE_RATE * 100,
@@ -113,6 +125,9 @@ def portfolio_agent(state: FundState):
             current_shares=current_shares,
             avg_cost=avg_cost,
             floating_pnl_pct=floating_pnl_pct,
+            nearest_support=nearest_support,
+            nearest_resistance=nearest_resistance,
+            broke_support=broke_support,
             tradable_shares=tradable_shares,
         )
 

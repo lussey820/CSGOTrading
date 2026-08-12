@@ -67,13 +67,14 @@ def technical_agent(state: FundState):
         return state
 
     # Analyze technical indicators
+    levels_text, support_level, resistance_level = get_support_resistance(prices_df, thresholds["support_resistance"])
     signal_results = {
         "trend": get_trend_signal(prices_df, thresholds["trend"]),
         "mean_reversion": get_mean_reversion_signal(prices_df, thresholds["mean_reversion"]),
         "rsi": get_rsi_signal(prices_df, thresholds["rsi"]),
         "volatility":  get_volatility_signal(prices_df, thresholds["volatility"]),
         "volume": get_volume_analysis(prices_df, thresholds["volume"]),
-        "price_levels": get_support_resistance(prices_df, thresholds["support_resistance"]),
+        "price_levels": levels_text,
     }
 
     # Make prompt
@@ -88,6 +89,12 @@ def technical_agent(state: FundState):
         llm_config=llm_config,
         pydantic_model=AnalystSignal
     )
+
+    # 支撑/阻力由指标代码计算(精确),覆盖 LLM 输出,供决策端做破位止损判断
+    if support_level is not None:
+        signal.support = support_level
+    if resistance_level is not None:
+        signal.resistance = resistance_level
 
     # save signal
     logger.log_signal(agent_name, ticker, signal)
@@ -229,7 +236,10 @@ def get_volume_analysis(prices_df, params):
 
 
 def get_support_resistance(prices_df, params):
-    """Calculate support and resistance levels"""
+    """Calculate support and resistance levels.
+
+    Returns: (展示文本, 最近支撑位, 最近阻力位)。无法识别时为 (失败文本, None, None)。
+    """
     def _is_level(prices: pd.Series, i: int, level_type: str, pivot_window: int = params["pivot_window"]) -> bool:
         """Check if the price point is a support/resistance level by comparing with surrounding prices"""
         start_idx = max(0, i - pivot_window)
@@ -269,11 +279,11 @@ def get_support_resistance(prices_df, params):
     resistance = min(resistance_levels) if resistance_levels else None
 
     if support is None or resistance is None:
-        return "Failed to analyze support and resistance levels"
+        return "Failed to analyze support and resistance levels", None, None
     else:
         result = f"- Current price: {current_price}\n"
         result += f"- Nearest support: {support}\n"
         result += f"- Nearest resistance: {resistance}\n"
         result += f"- Price to support: {(current_price - support) / support}\n"
         result += f"- Price to resistance: {(resistance - current_price) / current_price}\n"
-        return result
+        return result, float(support), float(resistance)

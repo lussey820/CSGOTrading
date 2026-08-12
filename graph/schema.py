@@ -1,6 +1,6 @@
 import operator
 from datetime import datetime
-from typing import  List, Dict, Any
+from typing import List, Dict, Any, Optional
 from typing_extensions import TypedDict, Annotated
 from pydantic import BaseModel, Field
 from graph.constants import Signal, Action
@@ -15,6 +15,14 @@ class AnalystSignal(BaseModel):
     justification: str = Field(
         description="Brief explanation for the signal",
         default="No justification provided due to error"
+    )
+    support: Optional[float] = Field(
+        default=None,
+        description="最近支撑位价格(数值),无法判断时为 null"
+    )
+    resistance: Optional[float] = Field(
+        default=None,
+        description="最近阻力位价格(数值),无法判断时为 null"
     )
 
 class Decision(BaseModel):

@@ -2,6 +2,8 @@ ANALYST_OUTPUT_FORMAT = """
 Provide structured output:
 - signal: ["Bullish", "Bearish", "Neutral"]
 - justification: 用中文简要说明你的分析
+- support: 最近支撑位价格(数字,无法判断填 null)
+- resistance: 最近阻力位价格(数字,无法判断填 null)
 """
 
 TECHNICAL_PROMPT = """
@@ -137,7 +139,9 @@ Cross-reference both views to confirm signals. Provide a structured analysis cov
 Respond as a JSON object with exactly these keys:
 {{
   "signal": "Bullish" | "Bearish" | "Neutral",
-  "justification": "用中文简要总结趋势证据、关键价位和成交量(3-5句话)"
+  "justification": "用中文简要总结趋势证据、关键价位和成交量(3-5句话)",
+  "support": "最近支撑位价格(数字,无法判断填 null)",
+  "resistance": "最近阻力位价格(数字,无法判断填 null)"
 }}
 """
 
@@ -152,6 +156,9 @@ Current Price: {current_price}
 Holding Shares: {current_shares}
 Average Cost (持仓成本): {avg_cost}
 Floating P&L (浮盈/浮亏%): {floating_pnl_pct}
+Nearest Support (最近支撑位): {nearest_support}
+Nearest Resistance (最近阻力位): {nearest_resistance}
+Broke Support (已跌破支撑): {broke_support}
 Tradable Shares: {tradable_shares}
 
 Trading friction: selling fee {transaction_fee_rate_pct:.2f}% (applies to sells only).
@@ -159,7 +166,7 @@ Trading friction: selling fee {transaction_fee_rate_pct:.2f}% (applies to sells 
 Rules:
 - If tradable_shares > 0: you may buy (no fee on buy).
 - If tradable_shares < 0: you may sell; ensure expected downside risk outweighs sell fee.
-- If tradable_shares ≈ 0: default to Hold, BUT if the floating loss is significant (e.g. ≥15%) and signals remain bearish, a stop-loss Sell may be justified to cut losses — weigh the remaining downside against the {transaction_fee_rate_pct:.2f}% sell fee before deciding.
+- If tradable_shares ≈ 0: default to Hold, BUT if broke_support is True (current price has broken below the nearest support) and signals remain bearish, a stop-loss Sell may be justified to cut losses — weigh the remaining downside against the {transaction_fee_rate_pct:.2f}% sell fee before deciding. If no support level is available (nearest_support is null) and the floating loss is significant (e.g. ≥15%), you may also evaluate a stop-loss.
 - Compare current price against your average cost: if current price < avg_cost you hold a floating loss; factor this into Buy/Hold/Sell.
 - Ensure expected profit after (sell) fees is positive; otherwise Hold.
 
@@ -182,12 +189,15 @@ Current Price: {current_price}
 Holding Shares: {current_shares}
 Average Cost (持仓成本): {avg_cost}
 Floating P&L (浮盈/浮亏%): {floating_pnl_pct}
+Nearest Support (最近支撑位): {nearest_support}
+Nearest Resistance (最近阻力位): {nearest_resistance}
+Broke Support (已跌破支撑): {broke_support}
 Tradable Shares: {tradable_shares}
 
 Rules:
 - If tradable_shares > 0: you may buy.
 - If tradable_shares < 0: you may sell.
-- If tradable_shares ≈ 0: default to Hold, BUT if the floating loss is significant (e.g. ≥15%) and signals remain bearish, a stop-loss Sell may be justified to cut losses.
+- If tradable_shares ≈ 0: default to Hold, BUT if broke_support is True (current price has broken below the nearest support) and signals remain bearish, a stop-loss Sell may be justified to cut losses. If no support level is available (nearest_support is null) and the floating loss is significant (e.g. ≥15%), you may also evaluate a stop-loss.
 - Compare current price against your average cost: if current price < avg_cost you hold a floating loss; factor this into your decision.
 
 You must provide your decision as a structured output with the following fields:
