@@ -57,6 +57,9 @@ class AgentWorkflow:
         
         # Transaction fee setting (default: True for backward compatibility)
         self.enable_transaction_fee = config.get('enable_transaction_fee', True)
+
+        # AI 端:卖出决策后自动结算已实现盈亏
+        self.auto_settle = config.get('auto_settle', False)
         
         # Validate analysts and remove invalid ones
         if self.workflow_analysts:
@@ -201,14 +204,26 @@ class AgentWorkflow:
             # safety limit: ensure no negative position
             max_sellable_shares = portfolio.positions[ticker].shares
             actual_shares = min(shares, max_sellable_shares)
-            
+
             portfolio.positions[ticker].shares -= actual_shares
             # Apply transaction fee only if enabled
             if enable_transaction_fee:
                 portfolio.cashflow += price * actual_shares * (1 - TRANSACTION_FEE_RATE)
             else:
                 portfolio.cashflow += price * actual_shares
-            
+
+            # AI 端:卖出落地即自动结算已实现盈亏(扣 2% 手续费)
+            if getattr(self, "auto_settle", False) and actual_shares > 0:
+                from ai_trader import auto_settle_sell
+                trade_date = str(self.trading_date)[:10] if self.trading_date else None
+                auto_settle_sell(
+                    item_name=ticker,
+                    shares=actual_shares,
+                    sell_price=price,
+                    trade_date=trade_date,
+                    avg_cost=portfolio.positions[ticker].avg_cost,
+                )
+
             # log limited sell order
             if actual_shares < shares:
                 fee_info = f"fee_rate={TRANSACTION_FEE_RATE:.2%}" if enable_transaction_fee else "no fee"
