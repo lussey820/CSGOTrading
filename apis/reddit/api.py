@@ -97,7 +97,79 @@ class RedditAPI:
             csv_path = os.path.join(os.path.dirname(__file__), 'reddit_data.csv')
         self.csv_path = csv_path
         self._csv_data = None  # Cache for CSV data
-    
+
+    @staticmethod
+    def _is_today(trading_date: Optional[datetime]) -> bool:
+        """实时场景判断:trading_date 为空或就是今天 → 走实时 Reddit API。"""
+        if trading_date is None:
+            return True
+        try:
+            return str(trading_date)[:10] == datetime.now().strftime("%Y-%m-%d")
+        except Exception:
+            return False
+
+    @staticmethod
+    def _submission_to_news(submission, sub_name: str) -> "MediaNews":
+        return MediaNews(
+            title=submission.title or "",
+            publish_time=datetime.fromtimestamp(submission.created_utc).isoformat(),
+            publisher=f"r/{sub_name}",
+            link=getattr(submission, "url", "") or "",
+            summary=(getattr(submission, "selftext", "") or "")[:300],
+            score=int(submission.score or 0),
+            num_comments=int(submission.num_comments or 0),
+        )
+
+    def _subreddit_live(self, subreddits: List[str], limit: int = 25,
+                        time_filter: str = "week", sort: str = "hot") -> List[MediaNews]:
+        """实时抓取指定 subreddit 的热门/最新帖子(仅用于今天,无数据泄漏问题)。"""
+        posts: List[MediaNews] = []
+        seen = set()
+        for sub_name in subreddits:
+            try:
+                sub = self.reddit.subreddit(sub_name)
+                method = getattr(sub, sort)
+                for submission in method(limit=limit * 2):
+                    if submission.id in seen:
+                        continue
+                    seen.add(submission.id)
+                    if (datetime.now() - datetime.fromtimestamp(submission.created_utc)).days > 7:
+                        continue  # time_filter=week ≈ 最近 7 天
+                    posts.append(self._submission_to_news(submission, sub_name))
+                    if len(posts) >= limit:
+                        break
+            except Exception as e:
+                logger.warning(f"Reddit live subreddit fetch failed in r/{sub_name}: {e}")
+            if len(posts) >= limit:
+                break
+        return posts
+
+    def _search_live(self, subreddits: List[str], query: str, limit: int = 15,
+                     min_score: int = 0, min_comments: int = 0,
+                     time_filter: str = "week", sort: str = "relevance") -> List[MediaNews]:
+        """实时搜索相关帖子(仅用于今天)。"""
+        posts: List[MediaNews] = []
+        seen = set()
+        for sub_name in subreddits:
+            try:
+                sub = self.reddit.subreddit(sub_name)
+                for submission in sub.search(query, limit=limit, sort=sort, time_filter=time_filter):
+                    if submission.id in seen:
+                        continue
+                    seen.add(submission.id)
+                    if int(submission.score or 0) < min_score:
+                        continue
+                    if int(submission.num_comments or 0) < min_comments:
+                        continue
+                    posts.append(self._submission_to_news(submission, sub_name))
+                    if len(posts) >= limit:
+                        break
+            except Exception as e:
+                logger.warning(f"Reddit live search failed in r/{sub_name}: {e}")
+            if len(posts) >= limit:
+                break
+        return posts
+
     def _load_reddit_data_from_csv(self) -> Optional[pd.DataFrame]:
         """
         Load historical Reddit data from a CSV file.
@@ -223,6 +295,12 @@ class RedditAPI:
         Returns:
             List of MediaNews objects filtered by trading_date
         """
+        # 实时场景(今天/未指定):直接走 praw,避免依赖预抓 CSV
+        if self._is_today(trading_date):
+            return self._subreddit_live(
+                subreddits=subreddits, limit=limit, time_filter=time_filter, sort=sort
+            )
+
         # If trading_date is provided, calculate the date range (trading_date - 7 days to trading_date)
         # NOTE: We ONLY read from CSV to avoid data leakage (using future data in backtesting)
         # Reddit API cannot fetch historical data for specific dates, so we must use pre-fetched CSV data
@@ -286,6 +364,18 @@ class RedditAPI:
         Returns:
             List of MediaNews objects, filtered by quality and trading_date
         """
+        # 实时场景(今天/未指定):直接走 praw 搜索,避免依赖预抓 CSV
+        if self._is_today(trading_date):
+            return self._search_live(
+                subreddits=subreddits,
+                query=query,
+                limit=limit,
+                min_score=min_score,
+                min_comments=min_comments,
+                time_filter="week",
+                sort=sort,
+            )
+
         # If trading_date is provided, calculate the date range (trading_date - 7 days to trading_date)
         trading_date_end = None
         if trading_date:
