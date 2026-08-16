@@ -98,28 +98,6 @@ Evaluate event impact (bullish/bearish/neutral) for short-term (1-2 weeks) price
 
 """ + ANALYST_OUTPUT_FORMAT
 
-LIQUIDITY_PROMPT = """
-You are a liquidity analyst for CS2 items. Analyze liquidity based on trading volume and Reddit engagement.
-
-**Analysis:**
-{trading_volume_analysis}
-
-{reddit_engagement_analysis}
-
-**Thresholds:**
-- Volume: High ≥{volume_high}, Low <{volume_low}
-- Reddit: High (score ≥{reddit_high_score} or comments ≥{reddit_high_comments}), Low (score <{reddit_low_score} and comments <{reddit_low_comments})
-- Min posts: {reddit_min_posts}
-
-**Signal:**
-- Bullish: High volume OR strong engagement (both → higher confidence)
-- Bearish: Low volume OR weak engagement (both → higher confidence)
-- Neutral: Mixed/conflicting indicators or insufficient data
-
-Evaluate liquidity (bullish/bearish/neutral) for {ticker}. Explain which indicators contributed most.
-
-""" + ANALYST_OUTPUT_FORMAT
-
 
 VISION_PROMPT = """
 You are a visual technical analyst for the CS2 skin market. Analyze the attached chart screenshots for the item: {ticker}.

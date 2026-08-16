@@ -3,7 +3,6 @@ from langgraph.graph import StateGraph, START, END
 from graph.schema import FundState, Portfolio, Decision, Action, Position
 from graph.constants import AgentKey
 from agents.registry import AgentRegistry
-from agents.planner import planner_agent
 from util.cs2_db_helper import get_cs2_db
 from util.logger import logger
 from time import perf_counter
@@ -164,9 +163,6 @@ class AgentWorkflow:
             # update portfolio
             portfolio = self.update_portfolio_ticker(portfolio, ticker, final_state["decision"], self.enable_transaction_fee)
             logger.log_portfolio(f"{ticker} position update", portfolio)
-
-            if self.planner_mode:
-                self.current_analysts = None # clean and reset current_analysts
 
         logger.log_portfolio("Final Portfolio", portfolio)
         logger.info("Updating portfolio to Database")
