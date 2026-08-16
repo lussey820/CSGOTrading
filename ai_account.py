@@ -145,10 +145,16 @@ def _notify_result(summary: Dict, failed_names: List[str], crashed: bool = False
             detail = "\n".join(f"- {n}: 分析失败" for n in failed_names[:10])
             send_wechat(title, f"有 {summary['failed']} 个饰品分析失败:\n\n{detail}")
         elif summary.get("ok") and summary.get("total", 0) > 0:
-            send_wechat(
-                f"AI 持仓运行完成:全部 {summary['total']} 个饰品分析成功",
-                "AI 端虚拟账户已完成一轮分析,可打开 AI 持仓页查看最新决策。",
-            )
+            # 全成功:推送完整决策报告(总资产/现金 + 买卖/观望 + 理由),而非只有成功提示
+            from notify import generate_report
+            from datetime import datetime
+            today = datetime.now().strftime("%Y-%m-%d")
+            try:
+                report = generate_report("ai-account", today)
+            except Exception as e:
+                logger.error(f"ai_account: generate report failed: {e}")
+                report = "AI 端虚拟账户已完成一轮分析,可打开 AI 持仓页查看最新决策。"
+            send_wechat(f"AI 持仓分析 {today}", report)
     except Exception as e:
         logger.error(f"ai_account: notify failed: {e}")
 

@@ -106,11 +106,22 @@ def generate_report(exp_name, trading_date):
     total_assets = row["total_assets"]
     positions = json.loads(row["positions"]) if row["positions"] else {}
 
-    # 3. decisions by portfolio_id
+    # 3. decisions by portfolio_id(每饰品取最新一条,避免同一轮/多轮重复)
     cursor.execute(
-        "SELECT item_name, action, quantity, price, justification "
-        "FROM cs2_decision WHERE portfolio_id = ? ORDER BY item_name",
-        (portfolio_id,),
+        """
+        SELECT d.item_name, d.action, d.quantity, d.price, d.justification
+        FROM cs2_decision d
+        WHERE d.portfolio_id = ?
+          AND d.id = (
+              SELECT d2.id FROM cs2_decision d2
+              WHERE d2.portfolio_id = ?
+                AND d2.item_name = d.item_name
+              ORDER BY d2.updated_at DESC
+              LIMIT 1
+          )
+        ORDER BY d.item_name
+        """,
+        (portfolio_id, portfolio_id),
     )
     decisions = cursor.fetchall()
     conn.close()
