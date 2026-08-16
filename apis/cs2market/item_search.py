@@ -1,6 +1,6 @@
 """SteamDT 全量饰品基础信息 + 中/英文模糊搜索。
 
-用于「扫码识别」流程:OCR 识别出饰品名(中文或英文)后,在这里
+用于「图像识别」流程:OCR 识别出饰品名(中文或英文)后,在这里
 模糊匹配出标准的 marketHashName(英文)与中文名,再写入数据库。
 
 数据源:GET https://open.steamdt.com/open/cs2/v1/base
@@ -9,6 +9,7 @@
 
 import json
 import os
+import re
 import time
 import requests
 from pathlib import Path
@@ -82,7 +83,7 @@ def search_items(query: str, limit: int = 8) -> List[Dict]:
         按匹配度排序的候选列表,每项 {marketHashName, name}。
         精确匹配优先,包含匹配次之。
     """
-    q = (query or "").strip()
+    q = re.sub(r"\s+", " ", (query or "")).strip()
     if not q:
         return []
     items = load_base_items()

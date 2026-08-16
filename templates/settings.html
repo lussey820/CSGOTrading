@@ -1,0 +1,221 @@
+{% extends "base.html" %} {% block title %}API 设置 · CS2 交易助手{% endblock %}
+{% block content %}
+<div class="page-gap">
+  <div class="page-head">
+    <div>
+      <h1>API 设置</h1>
+      <p class="sub">配置各个平台的 API Key，保存后立即生效，不需要重启。</p>
+    </div>
+  </div>
+
+  <!-- 配置表单 -->
+  <div class="glass">
+    <div class="card-title">
+      <h2>密钥配置</h2>
+    </div>
+    <div id="settings-list" class="form-grid" style="margin-top: 4px">
+      {% for k in setting_keys %}
+      <div class="settings-item" data-env="{{ k.env }}">
+        <div class="flex items-center justify-between">
+          <label
+            class="field-label"
+            style="margin-bottom: 0"
+            for="key-{{ k.env }}"
+          >
+            {{ k.name }}
+            <span class="hint" style="margin: 0; display: inline"
+              >— {{ k.desc }}</span
+            >
+          </label>
+          <span class="badge key-status" data-status="loading">检测中…</span>
+        </div>
+        <div class="flex gap-2" style="margin-top: 8px">
+          <input
+            id="key-{{ k.env }}"
+            class="input flex-1"
+            type="password"
+            autocomplete="off"
+            placeholder="粘贴 {{ k.name }} 的 API Key"
+          />
+          <button
+            type="button"
+            class="btn btn-ghost btn-eye"
+            data-env="{{ k.env }}"
+          >
+            显示
+          </button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="form-row" style="margin-top: 16px">
+      <button id="btn-save" class="btn btn-primary">保存配置</button>
+      <span class="hint" style="margin: 0"
+        >留空的项保持不变，只保存填写了的内容。</span
+      >
+    </div>
+  </div>
+
+  <!-- 教程 -->
+  <div class="glass">
+    <div class="card-title">
+      <h2>配置步骤教程</h2>
+    </div>
+    <div class="guide">
+      <div class="guide-block">
+        <h3>
+          1. SteamDT 开放平台 <span class="badge badge-accent">饰品数据</span>
+        </h3>
+        <p>
+          提供饰品价格、K
+          线、以及全量饰品名称数据，<b>图像识别匹配中文名依赖它</b>。
+        </p>
+        <ol>
+          <li>
+            打开
+            <a href="https://open.steamdt.com" target="_blank" rel="noopener"
+              >open.steamdt.com</a
+            >，注册并登录账号。
+          </li>
+          <li>进入「开放平台 / OpenAPI」页面，创建一个应用（Application）。</li>
+          <li>
+            在应用详情里复制你的 <b>API Key</b>（一串 32
+            位十六进制字符），粘贴到上方「SteamDT 开放平台」输入框。
+          </li>
+          <li>
+            点击「保存配置」。注意：全量饰品接口每天限调用 1
+            次，首次成功后会缓存 24 小时。
+          </li>
+        </ol>
+      </div>
+      <div class="guide-block">
+        <h3>
+          2. 阿里云百炼 DashScope
+          <span class="badge badge-accent">图像识别 / 看图分析</span>
+        </h3>
+        <p>
+          用于<b>图像识别</b>（OCR
+          提取饰品名）和<b>今日建议的截图看图分析</b>（qwen-vl-plus 多模态）。
+        </p>
+        <ol>
+          <li>
+            打开
+            <a
+              href="https://bailian.console.aliyun.com/"
+              target="_blank"
+              rel="noopener"
+              >阿里云百炼控制台</a
+            >，用阿里云账号登录（未开通需实名认证）。
+          </li>
+          <li>
+            首次进入按引导「开通百炼 / 模型服务」；在「模型广场」确认可调用
+            <code>qwen-vl-plus</code>。
+          </li>
+          <li>
+            点击右上角头像 →「API-KEY」，或左侧「API-KEY 管理」→ 创建新的 API
+            Key。
+          </li>
+          <li>
+            复制以 <code>sk-</code> 开头的密钥，粘贴到上方「阿里云百炼
+            DashScope」输入框并保存。
+          </li>
+        </ol>
+      </div>
+      <div class="guide-block">
+        <h3>3. DeepSeek <span class="badge badge-accent">AI 决策分析</span></h3>
+        <p>今日建议与 AI 持仓的<b>金融专家分析</b>使用 DeepSeek 大模型。</p>
+        <ol>
+          <li>
+            打开
+            <a
+              href="https://platform.deepseek.com/api_keys"
+              target="_blank"
+              rel="noopener"
+              >platform.deepseek.com</a
+            >，注册并登录。
+          </li>
+          <li>
+            在左侧「API Keys」页面点击「创建 API Key」，复制生成的密钥（以
+            <code>sk-</code> 开头）。
+          </li>
+          <li>确保账户内有余额（充值后 API 才能正常调用）。</li>
+          <li>粘贴到上方「DeepSeek」输入框并保存。</li>
+        </ol>
+      </div>
+      <div class="guide-block guide-tip">
+        <p>
+          <b>小提示：</b>密钥保存在项目根目录的
+          <code>.env</code> 文件中，请勿把该文件提交到公开仓库。
+          修改后立即写入运行时环境，图像识别 / 看图 / 决策分析下次调用即可生效。
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block scripts %}
+<script>
+  // 加载当前配置状态
+  async function loadSettings() {
+    var data = await fetchJSON("/api/settings");
+    data.settings.forEach(function (s) {
+      var item = document.querySelector(
+        '.settings-item[data-env="' + s.env + '"]',
+      );
+      if (!item) return;
+      var badge = item.querySelector(".key-status");
+      var input = item.querySelector("input");
+      badge.className =
+        "badge key-status " + (s.configured ? "badge-hold" : "badge-danger");
+      badge.textContent = s.configured ? "已配置" : "未配置";
+      input.placeholder = s.configured
+        ? "已配置：" + s.masked + "（留空保持不变）"
+        : "粘贴 " + s.name + " 的 API Key";
+    });
+  }
+
+  // 显示 / 隐藏密钥
+  document.querySelectorAll(".btn-eye").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var input = document.getElementById("key-" + btn.dataset.env);
+      var show = input.type === "password";
+      input.type = show ? "text" : "password";
+      btn.textContent = show ? "隐藏" : "显示";
+    });
+  });
+
+  // 保存
+  document
+    .getElementById("btn-save")
+    .addEventListener("click", async function () {
+      var keys = {};
+      document.querySelectorAll(".settings-item").forEach(function (item) {
+        var env = item.dataset.env;
+        var input = document.getElementById("key-" + env);
+        if (input.value.trim()) {
+          keys[env] = input.value.trim();
+        }
+      });
+      var btn = document.getElementById("btn-save");
+      btn.disabled = true;
+      btn.textContent = "保存中…";
+      try {
+        await fetchJSON("/api/settings", {
+          method: "POST",
+          body: JSON.stringify({ keys: keys }),
+        });
+        showToast("配置已保存", "success");
+        document.querySelectorAll(".settings-item input").forEach(function (i) {
+          i.value = "";
+        });
+        await loadSettings();
+      } catch (e) {
+        showToast("保存失败：" + e.message, "error");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "保存配置";
+      }
+    });
+
+  loadSettings();
+</script>
+{% endblock %}

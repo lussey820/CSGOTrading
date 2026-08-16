@@ -1,0 +1,31 @@
+# API 密钥(绝不提交)
+.env
+
+# 本地 SQLite 数据库(用户数据,不提交)
+*.db
+assets/cs2.db
+
+# Python 编译产物
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 虚拟环境
+.venv/
+venv/
+
+# 第三方运行时产物(由 pip / playwright 恢复,不提交)
+libs/
+playwright_browsers/
+
+# 运行时日志
+logs/
+*.log
+webui_err.log
+webui_out.log
+
+# 用户交易记录(JSON,按月分文件)
+user_trades/
+
+# 本地截图/临时文件
+picture/

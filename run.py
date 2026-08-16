@@ -8,18 +8,20 @@ Automatically discover available experiments from the configuration file directo
 import sys
 import os
 import argparse
+import traceback
 import yaml
 from typing import Dict, Any
 from datetime import datetime, timedelta
 from pathlib import Path
 from dotenv import load_dotenv
 from graph.workflow import AgentWorkflow
+from agents.registry import AgentRegistry
 from util.config import ConfigParser
 from util.logger import logger
 from util.cs2_db_helper import cs2_db_initialize, get_cs2_db
 
 _script_dir = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(_script_dir)
+PROJECT_ROOT = _script_dir
 
 
 def load_portfolio_config(cfg: Dict[str, Any], db):
@@ -63,6 +65,9 @@ def run_single_experiment(config_path: str, trading_date: str, use_local_db: boo
     if latest_trading_date and latest_trading_date > cfg["trading_date"]:
         raise RuntimeError(f"Trading date {trading_date} is not in chronological order")
 
+    # Initialize agent registry
+    AgentRegistry.run_registry()
+    
     # Run workflow
     app = AgentWorkflow(cfg, config_id)
     time_cost = app.run(config_id)
@@ -84,6 +89,7 @@ def run_experiment(trading_date: str, config_path: str, use_local_db: bool = Tru
         return True
     except Exception as e:
         logger.error(f"Error running experiment for {trading_date}: {e}")
+        traceback.print_exc()
         print(f"\n{trading_date} run failed: {e}")
         return False
 
@@ -122,7 +128,7 @@ Example usage:
         sys.exit(1)
     
     try:
-        abs_config_path = os.path.join(PROJECT_ROOT, "src", "config", config_path)
+        abs_config_path = os.path.join(PROJECT_ROOT, "config", config_path)
             
         with open(abs_config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
@@ -151,7 +157,7 @@ Example usage:
     use_local_db = not args.no_local_db
     
     # Ensure log directory exists
-    Path(PROJECT_ROOT, "src", "logs").mkdir(parents=True, exist_ok=True)
+    Path(PROJECT_ROOT, "logs").mkdir(parents=True, exist_ok=True)
     
     current_date = start_date
     

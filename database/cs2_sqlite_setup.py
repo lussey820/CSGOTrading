@@ -60,7 +60,7 @@ def init_cs2_database():
     )
     ''')
 
-    # Create CS2 signal table 
+    # Create CS2 signal table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS cs2_signal (
         id VARCHAR(36) PRIMARY KEY,
@@ -76,8 +76,75 @@ def init_cs2_database():
     )
     ''')
 
+    # Create CS2 inventory table - tracks user's real holdings
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS cs2_inventory (
+        id VARCHAR(36) PRIMARY KEY,
+        item_name VARCHAR(100) NOT NULL,
+        item_name_cn VARCHAR(200),
+        shares INTEGER NOT NULL DEFAULT 1,
+        buy_price DECIMAL(15,2) NOT NULL,
+        buy_date TIMESTAMP NOT NULL,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+
+    # Alter cs2_inventory to add item_name_cn column (SQLite ALTER TABLE for existing DBs)
+    try:
+        cursor.execute('ALTER TABLE cs2_inventory ADD COLUMN item_name_cn VARCHAR(200)')
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    # Create CS2 AI trade table - tracks realized P&L from AI decisions
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS cs2_ai_trade (
+        id VARCHAR(36) PRIMARY KEY,
+        item_name VARCHAR(100) NOT NULL,
+        action VARCHAR(10) NOT NULL,  -- buy, sell
+        sell_price DECIMAL(15,2),
+        buy_price DECIMAL(15,2),
+        shares INTEGER NOT NULL,
+        fee DECIMAL(15,2) NOT NULL DEFAULT 0,
+        realized_pnl DECIMAL(15,2) NOT NULL DEFAULT 0,
+        decision_id VARCHAR(36),
+        trade_date TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (decision_id) REFERENCES cs2_decision(id)
+    )
+    ''')
+
+    # Create screenshot cache table - tracks chart screenshot warmup results
+    # 每次预热用 UUID 作为记录 id,5 小时内有效;过期后重新截图并覆盖路径。
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS cs2_screenshot_cache (
+        id VARCHAR(36) PRIMARY KEY,
+        item_name VARCHAR(100) NOT NULL UNIQUE,
+        kline_path VARCHAR(500),
+        line_path VARCHAR(500),
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',  -- pending|done|error
+        error_msg TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+
+    # Alter cs2_decision to add realized_pnl column (SQLite ALTER TABLE for existing DBs)
+    try:
+        cursor.execute('ALTER TABLE cs2_decision ADD COLUMN realized_pnl DECIMAL(15,2) DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
 
     # Create indices for CS2 tables
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_cs2_inventory_item_name ON cs2_inventory(item_name)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_cs2_inventory_buy_date ON cs2_inventory(buy_date)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_cs2_ai_trade_item_name ON cs2_ai_trade(item_name)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_cs2_ai_trade_trade_date ON cs2_ai_trade(trade_date)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_cs2_ai_trade_decision_id ON cs2_ai_trade(decision_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_cs2_screenshot_cache_status ON cs2_screenshot_cache(status)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_cs2_screenshot_cache_updated ON cs2_screenshot_cache(updated_at)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_cs2_config_exp_name ON cs2_config(exp_name)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_cs2_config_market_type ON cs2_config(market_type)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_cs2_portfolio_updated ON cs2_portfolio(updated_at)')

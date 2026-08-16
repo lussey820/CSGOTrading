@@ -1,0 +1,342 @@
+{% extends "base.html" %} {% block title %}决策对照 · CS2 交易助手{% endblock %}
+{% block content %}
+<div class="page-gap">
+  <div class="page-head">
+    <div>
+      <h1>决策对照</h1>
+      <p class="sub">AI 端虚拟账户 vs 你的真实操作,按总盈亏口径对比净利润。</p>
+    </div>
+  </div>
+
+  <!-- 加载进度(实时抓取价格较慢,显示进度条) -->
+  <div
+    id="cmp-loading"
+    class="glass"
+    style="display: none; padding: 14px 16px; margin-bottom: 16px"
+  >
+    <div class="loading-hint">
+      <span class="spinner"></span>
+      <span>正在加载市场数据(SteamDT 限速,较慢)</span>
+      <span id="cmp-loading-text" class="phase-text"></span>
+    </div>
+    <div class="progress-track" style="margin-top: 8px">
+      <div id="cmp-loading-bar" class="progress-bar" style="width: 0%"></div>
+    </div>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="glass">
+      <div class="kpi-label">AI 端净利润</div>
+      <div id="cmp-ai-pnl" class="kpi-value">-</div>
+      <div class="kpi-sub">已实现 + 未实现</div>
+    </div>
+    <div class="glass">
+      <div class="kpi-label">你的净利润</div>
+      <div id="cmp-user-pnl" class="kpi-value">-</div>
+      <div class="kpi-sub">已实现 + 未实现</div>
+    </div>
+    <div class="glass">
+      <div class="kpi-label">差值 (AI - 你)</div>
+      <div id="cmp-diff" class="kpi-value">-</div>
+      <div class="kpi-sub">正 = AI 更赚</div>
+    </div>
+    <div class="glass">
+      <div class="kpi-label">操作数</div>
+      <div id="cmp-counts" class="kpi-value">-</div>
+      <div class="kpi-sub">AI 卖出 / 你售出</div>
+    </div>
+  </div>
+
+  <!-- 净利润曲线 -->
+  <div class="glass">
+    <div class="card-title">
+      <h2>净利润曲线</h2>
+      <span class="muted" style="font-size: 12px"
+        >总盈亏口径(已实现 + 未实现)</span
+      >
+    </div>
+    <div style="height: 300px">
+      <canvas id="cmp-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- 操作对照表 -->
+  <div class="glass">
+    <div class="card-title">
+      <h2>操作对照</h2>
+      <div class="flex gap-3">
+        <button id="cmp-toggle" class="btn btn-ghost btn-sm">只看 AI 端</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="glass-table">
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>来源</th>
+            <th>饰品</th>
+            <th class="num">操作</th>
+            <th class="num">数量</th>
+            <th class="num">成交价</th>
+            <th class="num">手续费</th>
+            <th class="num">已实现盈亏</th>
+          </tr>
+        </thead>
+        <tbody id="cmp-tbody"></tbody>
+      </table>
+    </div>
+    <div id="cmp-empty" class="empty" style="display: none">
+      暂无操作记录。AI 端跑一轮 + 你的买入/售出后,这里会自动对齐显示。
+    </div>
+  </div>
+</div>
+{% endblock %} {% block scripts %}
+<script>
+  let cmpChart = null;
+  let showUser = true;
+
+  const SIDE_META = {
+    ai: { label: "AI 端", cls: "badge-accent" },
+    user: { label: "你", cls: "badge-hold" },
+  };
+  const ACTION_TEXT = {
+    buy: "买入",
+    sell: "售出",
+    BUY: "买入",
+    SELL: "卖出",
+    hold: "持有",
+    HOLD: "持有",
+  };
+
+  function mergeCurve(aiPts, userPts) {
+    const dates = new Set();
+    (aiPts || []).forEach((p) => dates.add(p.date));
+    (userPts || []).forEach((p) => dates.add(p.date));
+    const sorted = Array.from(dates).sort();
+    const aiMap = {},
+      userMap = {};
+    (aiPts || []).forEach((p) => (aiMap[p.date] = p.net));
+    (userPts || []).forEach((p) => (userMap[p.date] = p.net));
+    // 前向填充,保持连续
+    let lastAi = null,
+      lastUser = null;
+    return sorted.map((d) => {
+      if (aiMap[d] !== undefined) lastAi = aiMap[d];
+      if (userMap[d] !== undefined) lastUser = userMap[d];
+      return { date: d, ai: lastAi, user: lastUser };
+    });
+  }
+
+  function renderChart(points) {
+    const ctx = document.getElementById("cmp-chart");
+    if (cmpChart) cmpChart.destroy();
+    cmpChart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: points.map((p) => p.date),
+        datasets: [
+          {
+            label: "AI 端净利润",
+            data: points.map((p) => p.ai),
+            borderColor: "#3b82f6",
+            backgroundColor: "rgba(59,130,246,0.1)",
+            fill: true,
+            tension: 0.3,
+            pointRadius: 2,
+          },
+          {
+            label: "你的净利润",
+            data: points.map((p) => p.user),
+            borderColor: "#f59e0b",
+            backgroundColor: "rgba(245,158,11,0.1)",
+            fill: true,
+            tension: 0.3,
+            pointRadius: 2,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        scales: {
+          x: { grid: { display: false } },
+          y: {
+            ticks: { callback: (v) => "¥" + v },
+          },
+        },
+        plugins: {
+          legend: {
+            labels: {
+              color:
+                getComputedStyle(document.body).getPropertyValue("--text-2") ||
+                "#888",
+            },
+          },
+          tooltip: {
+            callbacks: {
+              label: (c) =>
+                " " +
+                c.dataset.label +
+                ": ¥" +
+                Number(c.parsed.y || 0).toFixed(2),
+            },
+          },
+        },
+      },
+    });
+  }
+
+  function renderTrades(aiTrades, userTrades) {
+    const tbody = document.getElementById("cmp-tbody");
+    const empty = document.getElementById("cmp-empty");
+    tbody.innerHTML = "";
+
+    const rows = [];
+    (aiTrades || []).forEach((t) =>
+      rows.push({
+        date: t.trade_date || "",
+        side: "ai",
+        item: t.item_name,
+        action: t.action,
+        shares: t.shares,
+        price: t.price != null ? t.price : t.buy_price,
+        fee: t.fee || 0,
+        pnl: t.realized_pnl,
+      }),
+    );
+    (userTrades || []).forEach((t) =>
+      rows.push({
+        date: t.trade_date || (t.created_at || "").slice(0, 10),
+        side: "user",
+        item: t.item_name,
+        action: t.action,
+        shares: t.shares,
+        price: t.price,
+        fee: t.fee || 0,
+        pnl: t.realized_pnl,
+      }),
+    );
+    rows.sort((a, b) => (a.date < b.date ? 1 : -1));
+
+    if (!rows.length) {
+      empty.style.display = "";
+      return;
+    }
+    empty.style.display = "none";
+    for (const r of rows) {
+      if (!showUser && r.side === "user") continue;
+      const meta = SIDE_META[r.side];
+      const tr = document.createElement("tr");
+      const pnlEl =
+        r.pnl == null ? '<span class="muted">-</span>' : fmtMoney(r.pnl);
+      const pnlCls = r.pnl == null ? "" : " " + colorClass(r.pnl);
+      tr.innerHTML = `
+        <td class="mono muted">${escapeHtml(r.date)}</td>
+        <td><span class="badge ${meta.cls}">${meta.label}</span></td>
+        <td class="mono truncate" style="max-width:220px">${escapeHtml(r.item)}</td>
+        <td class="num">${escapeHtml(ACTION_TEXT[r.action] || r.action)}</td>
+        <td class="num">${r.shares ?? "-"}</td>
+        <td class="num">${r.price == null ? "-" : fmtMoney(r.price)}</td>
+        <td class="num muted">${r.fee ? fmtMoney(r.fee) : "-"}</td>
+        <td class="num${pnlCls}">${pnlEl}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+  }
+
+  let cmpPollTimer = null;
+
+  function showCmpProgress(prog) {
+    const box = document.getElementById("cmp-loading");
+    box.style.display = "";
+    const done = (prog && prog.done) || 0;
+    const total = (prog && prog.total) || 0;
+    const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 8;
+    document.getElementById("cmp-loading-bar").style.width = pct + "%";
+    const cur = prog && prog.current ? " · " + escapeHtml(prog.current) : "";
+    document.getElementById("cmp-loading-text").textContent =
+      (total > 0 ? done + " / " + total : "") + cur;
+  }
+  function hideCmpProgress() {
+    document.getElementById("cmp-loading").style.display = "none";
+  }
+  function stopCmpPolling() {
+    if (cmpPollTimer) {
+      clearInterval(cmpPollTimer);
+      cmpPollTimer = null;
+    }
+  }
+
+  function renderComparison(r) {
+    const ai = r.ai || {},
+      user = r.user || {};
+    document.getElementById("cmp-ai-pnl").textContent = fmtMoney(ai.total_pnl);
+    document.getElementById("cmp-ai-pnl").className =
+      "kpi-value " + colorClass(ai.total_pnl);
+    document.getElementById("cmp-user-pnl").textContent = fmtMoney(
+      user.total_pnl,
+    );
+    document.getElementById("cmp-user-pnl").className =
+      "kpi-value " + colorClass(user.total_pnl);
+    const diff = (ai.total_pnl || 0) - (user.total_pnl || 0);
+    document.getElementById("cmp-diff").textContent = fmtMoney(diff);
+    document.getElementById("cmp-diff").className =
+      "kpi-value " + colorClass(diff);
+    document.getElementById("cmp-counts").textContent =
+      (ai.trade_count || 0) + " / " + (user.trade_count || 0);
+    const curve = r.curve || {};
+    renderChart(mergeCurve(curve.ai || [], curve.user || []));
+    renderTrades(ai.trades || [], user.trades || []);
+  }
+
+  async function pollComparison() {
+    let r;
+    try {
+      r = await fetchJSON("/api/comparison");
+    } catch (e) {
+      stopCmpPolling();
+      hideCmpProgress();
+      showToast(e.message, "error");
+      return;
+    }
+    if (r.running) {
+      showCmpProgress(r.progress);
+      return;
+    }
+    stopCmpPolling();
+    hideCmpProgress();
+    if (!r.ok) {
+      showToast(r.error || "加载失败", "error");
+      return;
+    }
+    renderComparison(r);
+  }
+
+  async function loadComparison() {
+    try {
+      const r = await fetchJSON("/api/comparison");
+      if (r.running) {
+        showCmpProgress(r.progress);
+        if (cmpPollTimer) clearInterval(cmpPollTimer);
+        cmpPollTimer = setInterval(pollComparison, 1200);
+        return;
+      }
+      hideCmpProgress();
+      if (!r.ok) throw new Error(r.error || "load failed");
+      renderComparison(r);
+    } catch (e) {
+      hideCmpProgress();
+      showToast(e.message, "error");
+    }
+  }
+
+  document.getElementById("cmp-toggle").addEventListener("click", function () {
+    showUser = !showUser;
+    this.textContent = showUser ? "只看 AI 端" : "两边都看";
+    loadComparison();
+  });
+
+  loadComparison();
+</script>
+{% endblock %}

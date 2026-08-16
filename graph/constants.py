@@ -6,10 +6,11 @@ class AgentKey:
     SENTIMENT = "sentiment"
     SENTIMENT_REVERSE = "sentiment_reverse"
     LIQUIDITY = "liquidity"
-    EVENT = "event"  
+    EVENT = "event"
+    VISION = "vision"
     # workflow keys
     PORTFOLIO = "portfolio manager"
-    PLANNER = "analyst planner" 
+    PLANNER = "analyst planner"
 
 class Signal(str, Enum):
     """Signal type"""

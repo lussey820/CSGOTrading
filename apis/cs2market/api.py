@@ -1,221 +1,186 @@
 """
-CS2 Market API client implementation for CS2 market sentiment analysis.
-Uses CS2 Market API to fetch market data.
+CS2 Market API client - SteamDT API implementation.
+Uses SteamDT Open API to fetch market data (K-line, prices).
 """
 
-import pandas as pd
-import numpy as np
 import os
-from datetime import datetime, timedelta
+import logging
+import time
+import pandas as pd
+import requests
+from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
+
+logger = logging.getLogger("cs2market")
+STEAMDT_API_BASE = os.getenv("STEAMDT_API_BASE", "https://open.steamdt.com")
 
 
-def load_cs2_data(csv_path=None, fill_missing=True):
+def _steamdt_headers():
+    # 运行时读取,保证「API 设置」页保存的 Key 无需重启即可生效
+    return {
+        "Authorization": f"Bearer {os.getenv('STEAMDT_API_KEY')}",
+        "Content-Type": "application/json",
+    }
+
+
+def _fetch_kline(market_hash_name: str, kline_type: int = 1, platform: str = "ALL"):
     """
-    Load CS2 market data and optionally fill missing calendar dates.
-
+    Fetch K-line data from SteamDT API.
+    
     Args:
-        csv_path: Path to the CSV file.
-        fill_missing: Whether to fill missing dates using neighboring days.
-    """
-    if csv_path is None:
-        csv_path = os.path.join(os.path.dirname(__file__), 'cs2_data.csv')
-
-    df = pd.read_csv(csv_path)
-
-    # Detect date column with a fixed priority: batch_id -> date -> timestamp -> time -> dt
-    detected_date_column = None
-    for candidate in ['batch_id', 'date', 'timestamp', 'time', 'dt']:
-        if candidate in df.columns:
-            detected_date_column = candidate
-            break
-
-    if detected_date_column is None:
-        raise ValueError(
-            f"CSV missing date column. Required columns: batch_id, date, timestamp, time, dt. File: {csv_path}"
-        )
-
-    # Parse date column and normalize to a unified 'date' column.
-    # If the original column is batch_id, keep it (date only) and create 'date'.
-    if detected_date_column == 'batch_id':
-        df['batch_id'] = pd.to_datetime(df[detected_date_column], errors='coerce')
-        # batch_id keeps only the date part (no time)
-        df['batch_id'] = df['batch_id'].dt.date
-        df['date'] = pd.to_datetime(df['batch_id'])
-    else:
-        df[detected_date_column] = pd.to_datetime(df[detected_date_column], errors='coerce')
-        df = df.rename(columns={detected_date_column: 'date'})
-        # If batch_id does not exist, create it from 'date' (date only)
-        if 'batch_id' not in df.columns:
-            df['batch_id'] = df['date'].dt.date
-
-    # Ensure open/close/volume are numeric
-    for numeric_col in ['open', 'close', 'volume']:
-        if numeric_col in df.columns:
-            df[numeric_col] = pd.to_numeric(df[numeric_col], errors='coerce')
-
-    # Optionally fill missing dates per item
-    if fill_missing and 'name' in df.columns:
-        df = _fill_missing_dates(df)
+        market_hash_name: Steam item market hash name
+        kline_type: 1=daily, 2=weekly, 3=monthly
+        platform: ALL/BUFF/YOUPIN/C5/STEAM/HALOSKINS
     
-    return df
-
-
-def _fill_missing_dates(df):
+    Returns:
+        List of kline arrays: [[timestamp, open, close, high, low], ...]
     """
-    Fill missing calendar dates per item using nearby observations.
+    url = f"{STEAMDT_API_BASE}/open/cs2/item/v1/kline"
+    payload = {
+        "marketHashName": market_hash_name,
+        "type": kline_type,
+        "platform": platform,
+    }
 
-    Strategy:
-        - Prefer average of values from the previous and next available dates.
-        - Fallback to previous-only or next-only values when only one side exists.
+    last_err = None
+    for attempt in range(3):  # 网络偶发超时自动重试
+        try:
+            resp = requests.post(url, json=payload, headers=_steamdt_headers(), timeout=30)
+            data = resp.json()
+            if not data.get("success"):
+                raise RuntimeError(f"SteamDT kline API error: {data.get('errorMsg', 'unknown')}")
+            return data.get("data", [])
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(1.5 * (attempt + 1))
+    raise RuntimeError(f"SteamDT kline request failed after 3 attempts: {last_err}")
+
+
+def _fetch_current_price(market_hash_name: str):
     """
-    filled_rows = []
-    
-    # Process by item name
-    for item_name, item_df in df.groupby('name'):
-        item_df = item_df.sort_values('date').copy()
-        
-        # Build full date range for this item
-        min_date = item_df['date'].min().date()
-        max_date = item_df['date'].max().date()
-        date_range = pd.date_range(start=min_date, end=max_date, freq='D')
-        
-        # Find missing dates
-        existing_dates = set(item_df['date'].dt.date)
-        missing_dates = [d.date() for d in date_range if d.date() not in existing_dates]
-        
-        # Create filled rows for each missing date
-        for missing_date in missing_dates:
-            missing_datetime = pd.to_datetime(missing_date)
-            
-            # Look up data from two days before and after
-            prev_date = missing_datetime - pd.Timedelta(days=2)
-            next_date = missing_datetime + pd.Timedelta(days=2)
-            
-            prev_data = item_df[item_df['date'].dt.date == prev_date.date()]
-            next_data = item_df[item_df['date'].dt.date == next_date.date()]
-            
-            # If both sides exist, use the mean of the two days
-            if len(prev_data) > 0 and len(next_data) > 0:
-                prev_row = prev_data.iloc[0]
-                next_row = next_data.iloc[0]
-                
-                # Create a new row using the mean of neighbors
-                new_row = prev_row.copy()
-                new_row['date'] = missing_datetime
-                
-                # Set batch_id to the missing date (date only)
-                if 'batch_id' in new_row.index:
-                    new_row['batch_id'] = missing_date
-                
-                # Fill numeric columns
-                for col in ['open', 'close', 'volume']:
-                    if col in new_row.index:
-                        prev_val = prev_row[col]
-                        next_val = next_row[col]
-                        if pd.notna(prev_val) and pd.notna(next_val):
-                            new_row[col] = (prev_val + next_val) / 2
-                        elif pd.notna(prev_val):
-                            new_row[col] = prev_val
-                        elif pd.notna(next_val):
-                            new_row[col] = next_val
-                
-                filled_rows.append(new_row)
-            # If only previous day exists, copy previous values
-            elif len(prev_data) > 0:
-                prev_row = prev_data.iloc[0]
-                new_row = prev_row.copy()
-                new_row['date'] = missing_datetime
-                # Set batch_id
-                if 'batch_id' in new_row.index:
-                    new_row['batch_id'] = missing_datetime.replace(hour=12, minute=0, second=0)
-                filled_rows.append(new_row)
-            # If only next day exists, copy next values
-            elif len(next_data) > 0:
-                next_row = next_data.iloc[0]
-                new_row = next_row.copy()
-                new_row['date'] = missing_datetime
-                # Set batch_id
-                if 'batch_id' in new_row.index:
-                    new_row['batch_id'] = missing_datetime.replace(hour=12, minute=0, second=0)
-                filled_rows.append(new_row)
-    
-    # Append filled rows back to the original DataFrame
-    if filled_rows:
-        filled_df = pd.DataFrame(filled_rows)
-        df = pd.concat([df, filled_df], ignore_index=True)
-        df = df.sort_values(['name', 'date']).reset_index(drop=True)
+    Fetch current price from SteamDT API.
+    Returns the lowest sell price across all platforms, or 0.0 if unavailable.
+    """
+    url = f"{STEAMDT_API_BASE}/open/cs2/v1/price/single"
+    params = {"marketHashName": market_hash_name}
 
-    return df
+    last_err = None
+    for attempt in range(3):  # 网络偶发超时自动重试
+        try:
+            resp = requests.get(url, params=params, headers=_steamdt_headers(), timeout=15)
+            data = resp.json()
+            if not data.get("success"):
+                return 0.0
+            platforms = data.get("data", [])
+            sell_prices = [p.get("sellPrice") for p in platforms if p.get("sellPrice", 0) > 0]
+            return min(sell_prices) if sell_prices else 0.0
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(1.5 * (attempt + 1))
+    logger.warning(f"SteamDT price request failed after 3 attempts for {market_hash_name}: {last_err}")
+    return 0.0
 
 
 def get_cs2_stock_daily_candles_df(ticker="cs2_weapons", trading_date=None):
     """
-    Return CS2 item OHLCV history in stock-market compatible format.
-
-    Follows stock-market logic: returns all history from the earliest date up to trading_date.
+    Return CS2 item OHLCV history in stock-market compatible format via SteamDT API.
+    
     Args:
-        ticker: Item name used to filter a specific CS2 asset.
+        ticker: Steam item market hash name
         trading_date: Trading date; data strictly after this date is excluded.
+    
     Returns:
         DataFrame with columns: date, open, high, low, close, volume.
     """
-    # Load raw CS2 data
-    df = load_cs2_data()
+    raw_kline = _fetch_kline(ticker, kline_type=1)
     
-    # Filter by item name
-    df = df[df['name'] == ticker]
-    if df.empty:
-        print(f"Warning: no data found for item {ticker}")
+    if not raw_kline:
+        print(f"Warning: no kline data for {ticker}")
         return pd.DataFrame()
     
-    # Apply trading_date filter if provided (stock-style: exclude future data)
+    # Each kline entry: [timestamp, open, close, high, low]
+    records = []
+    for entry in raw_kline:
+        if isinstance(entry, list) and len(entry) >= 5:
+            ts_val = entry[0]
+            open_val = float(entry[1])
+            close_val = float(entry[2])
+            high_val = float(entry[3])
+            low_val = float(entry[4])
+            
+            # Convert timestamp to datetime (handle both string and numeric)
+            if isinstance(ts_val, str):
+                ts_val = float(ts_val)
+            
+            if isinstance(ts_val, (int, float)):
+                # Second-level timestamps (SteamDT uses seconds)
+                dt = datetime.fromtimestamp(int(ts_val))
+            else:
+                continue
+            
+            records.append({
+                "date": dt,
+                "open": open_val,
+                "close": close_val,
+                "high": high_val,
+                "low": low_val,
+                "volume": 0,  # SteamDT kline doesn't include volume
+            })
+    
+    if not records:
+        print(f"Warning: failed to parse kline data for {ticker}")
+        return pd.DataFrame()
+    
+    df = pd.DataFrame(records)
+    
+    # Apply trading_date filter if provided
     if trading_date:
         if isinstance(trading_date, str):
             trading_date = pd.to_datetime(trading_date)
         
-        # Keep rows with date <= trading_date
-        df = df[df['date'] <= trading_date]
+        df = df[df["date"] <= trading_date]
         
         if df.empty:
-            print(f"Warning: no data found on or before {trading_date.date()}")
+            print(f"Warning: no data on or before {trading_date.date()} for {ticker}")
             return pd.DataFrame()
     
-    # Ensure expected column names
-    df = df.rename(columns={
-        'open': 'open',
-        'close': 'close',
-        'volume': 'volume'
-    })
-    
-    # Add synthetic high/low columns (CS2 data has only open/close)
-    df['high'] = df[['open', 'close']].max(axis=1)
-    df['low'] = df[['open', 'close']].min(axis=1)
-    
-    # Sort by date
-    df = df.sort_values('date')
-    
+    df = df.sort_values("date").reset_index(drop=True)
     return df
 
 
 def get_cs2_last_close_price(ticker="cs2_weapons", trading_date=None):
     """
     Get the latest close price for a CS2 item up to trading_date.
-
-    Returns:
-        float: Latest close price, or 0.0 if no data.
+    For "today" mode, uses current market price from SteamDT.
     """
-    df = get_cs2_stock_daily_candles_df(ticker, trading_date)
+    # For current date (today), use the live price API
+    today = datetime.now().date()
+    if trading_date and hasattr(trading_date, 'date'):
+        query_date = trading_date.date() if hasattr(trading_date, 'date') else trading_date
+        if hasattr(query_date, 'date'):
+            query_date = query_date.date()
+    else:
+        query_date = today
     
+    if query_date >= today:
+        live_price = _fetch_current_price(ticker)
+        if live_price > 0:
+            return live_price
+    
+    # Fallback: use kline data
+    df = get_cs2_stock_daily_candles_df(ticker, trading_date)
     if df.empty:
         return 0.0
     
-    # Return close price on the latest available date
-    latest_data = df.iloc[-1]
-    return float(latest_data['close'])
+    return float(df.iloc[-1]["close"])
 
 
 class CS2MarketAPI:
-    """Lightweight CS2 Market API wrapper used by the Router."""
+    """CS2 Market API wrapper - SteamDT backend, used by the Router."""
     
     def get_cs2_stock_daily_candles_df(self, ticker, trading_date):
         """Get CS2 daily OHLCV dataframe."""

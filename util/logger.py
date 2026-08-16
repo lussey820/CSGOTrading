@@ -1,7 +1,16 @@
 import os
+import sys
 import logging
 from datetime import datetime
 from graph.schema import Decision, AnalystSignal, Portfolio, PositionRisk
+
+# Windows 默认 GBK 控制台无法编码 ¥(U+00A5) 等字符,写日志会抛 UnicodeEncodeError。
+# 统一改用 UTF-8 输出,并用 errors='replace' 兜底,保证任何字符都不会让日志崩溃。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 class CS2Logger:
     """Logger for the CS2 application."""
@@ -28,10 +37,10 @@ class CS2Logger:
         if self.logger.handlers:
             self.logger.handlers.clear()
         
-        # Create file handler
+        # Create file handler (显式 UTF-8,避免 Windows GBK 编码无法写入 ¥ 等字符)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_file = os.path.join(self.log_dir, f"cs2_{timestamp}.log")
-        file_handler = logging.FileHandler(log_file)
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
         file_handler.setLevel(self.log_level)
         
         # Create console handler

@@ -12,11 +12,12 @@ class AgentRegistry:
 
     # Analyst KEYs
     ANALYST_KEYS = [
-        AgentKey.TECHNICAL, 
+        AgentKey.TECHNICAL,
         AgentKey.SENTIMENT,
         AgentKey.SENTIMENT_REVERSE,
         AgentKey.LIQUIDITY,
-        AgentKey.EVENT
+        AgentKey.EVENT,
+        AgentKey.VISION,
     ]
 
     @classmethod
@@ -90,4 +91,10 @@ class AgentRegistry:
             key=AgentKey.EVENT,
             agent_func=event_agent,
             agent_doc="Event analysis specialist analyzing Steam official news and game updates for their impact on CS2 item prices (supply mechanism, visibility/popularity, market sentiment)."
+        )
+
+        cls.register_agent(
+            key=AgentKey.VISION,
+            agent_func=vision_agent,
+            agent_doc="Vision analyst: captures the SteamDT K-line chart screenshot and uses qwen-vl-plus to read trend, support/resistance, and volume patterns directly from the chart image."
         )

@@ -1,12 +1,12 @@
-{% extends "base.html" %}
-{% block title %}今日建议 · CS2 交易助手{% endblock %}
-
+{% extends "base.html" %} {% block title %}今日建议 · CS2 交易助手{% endblock %}
 {% block content %}
 <div class="page-gap">
   <div class="page-head">
     <div>
       <h1>今日建议</h1>
-      <p class="sub">针对你持有的饰品,AI 会分析价格走势,然后给出买入、卖出或持有的建议。</p>
+      <p class="sub">
+        针对你持有的饰品,AI 会分析价格走势,然后给出买入、卖出或持有的建议。
+      </p>
     </div>
     <div class="flex gap-3">
       <button id="btn-refresh" class="btn btn-ghost">刷新</button>
@@ -21,23 +21,37 @@
       <span id="warmup-badge" class="badge badge-hold">-</span>
     </div>
     <div class="progress-track">
-      <div id="warmup-bar" class="progress-bar" style="width:0%"></div>
+      <div id="warmup-bar" class="progress-bar" style="width: 0%"></div>
     </div>
-    <div class="hint" style="margin-top:10px;">
+    <div class="hint" style="margin-top: 10px">
       <span id="warmup-text">总 0 · 完成 0 · 待处理 0 · 错误 0</span>
     </div>
-    <div id="warmup-items" class="grid-3" style="margin-top:12px;"></div>
+    <div id="warmup-items" class="grid-3" style="margin-top: 12px"></div>
   </div>
 
   <!-- Run status -->
-  <div id="run-card" class="glass" style="display:none;">
+  <div id="run-card" class="glass" style="display: none">
     <h2 class="card-title">分析进度</h2>
-    <div class="space-y-1 text-sm" style="color:var(--text-2);">
+    <div
+      id="run-loading"
+      class="loading-hint"
+      style="display: none; margin-bottom: 10px"
+    >
+      <span class="spinner spinner-lg"></span>
+      <span>
+        <span id="run-loading-text" class="phase-text">正在调用 AI 分析</span>
+        <span class="ellipsis"></span>
+      </span>
+    </div>
+    <div class="space-y-1 text-sm" style="color: var(--text-2)">
       <div>当前步骤: <span id="run-phase" class="mono"></span></div>
       <div>正在分析: <span id="run-current" class="mono"></span></div>
       <div>进度: <span id="run-progress">0 / 0</span></div>
       <div>结果: <span id="run-result" class="mono"></span></div>
-      <div id="run-error" class="down" style="display:none;"></div>
+      <div id="run-error" class="down" style="display: none"></div>
+    </div>
+    <div class="progress-track" style="margin-top: 12px">
+      <div id="run-bar" class="progress-bar" style="width: 0%"></div>
     </div>
   </div>
 
@@ -48,208 +62,327 @@
     </div>
     <div id="decisions-list" class="space-y-3"></div>
     <div id="pending-list" class="space-y-2 mt-3"></div>
-    <div id="empty-decisions" class="empty" style="display:none;">尚无今日建议,点击「运行今日分析」</div>
+    <div id="empty-decisions" class="empty" style="display: none">
+      尚无今日建议,点击「运行今日分析」
+    </div>
   </div>
 </div>
-{% endblock %}
-
-{% block scripts %}
+{% endblock %} {% block scripts %}
 <script>
-let pollTimer = null;
+  let pollTimer = null;
 
-// 常见英文术语 -> 中文映射(兜底,新跑的分析直接输出中文)
-var _trMap = {
-  'Tradable shares': '可交易数量', 'Holding Shares': '持仓数量', 'Current Price': '当前价格',
-  'position': '仓位', 'shares': '份额', 'sell fee': '卖出手续费', 'buy': '买入',
-  'sell': '卖出', 'hold': '持有', 'Hold': '持有', 'Buy': '买入', 'Sell': '卖出',
-  'expected gain': '预期收益', 'expected profit': '预期利润', 'upward': '向上',
-  'downward': '向下', ' Bullish ': ' 看涨 ', ' Bearish ': ' 看跌 ', ' Neutral ': ' 中性 ',
-  'no position': '无仓位', 'optimal': '最优', 'allocation': '配置', 'trend': '趋势',
-  'support': '支撑', 'resistance': '阻力', 'volume': '成交量', 'momentum': '动量',
-  'breakout': '突破', 'oversold': '超卖', 'overbought': '超买', 'sideways': '横盘',
-  'conservative': '保守', 'fallback': '兜底', 'unavailable': '不可用',
-  'appropriate': '合适的', 'justify': '值得', 'incur': '产生', 'Given that': '鉴于',
-  'without': '没有', 'basis': '依据', 'factor': '因素', 'impact': '影响',
-  'positive': '正', 'negative': '负', 'decision': '决策', 'analysis': '分析',
-  'risk': '风险', 'profit': '利润', 'loss': '亏损', 'fee': '手续费',
-  'per share': '每股', 'not a factor': '不是影响因素', 'is no': '没有',
-  'There is no': '没有', 'meaning there is': '意味着没有',
-};
-// 整段固定模式 -> 中文(hold 类理由的常见句式)
-var _trSentences = [
-  ['Tradable shares are 0.0, which means there is no position to adjust.',
-   '可交易数量为 0,意味着没有需要调整的仓位。'],
-  ['Tradable shares are 0, which means there is no position to adjust.',
-   '可交易数量为 0,意味着没有需要调整的仓位。'],
-  ['With zero holding shares and zero tradable shares, there is no basis for a Buy or Sell action.',
-   '由于持仓数量和可交易数量都为 0,不存在买入或卖出的依据。'],
-  ['With no holdings and no tradable shares available, the optimal action is to Hold.',
-   '没有持仓也没有可交易数量,最优操作是继续持有。'],
-  ['without an optimal position ratio indicating a target allocation change',
-   '没有最优仓位比例指示需要调整目标配置'],
-  ['any Sell would incur a 2% fee ($4.16 per share), the expected gain does not justify entering a position.',
-   '任何卖出都会产生 2% 手续费(每股 ¥4.16),预期收益不足以支撑建仓。'],
-  ['the expected gain does not justify entering a position',
-   '预期收益不足以支撑建仓'],
-  ['Holding is the appropriate decision',
-   '继续持有是合适的决策'],
-  ['there is no basis for a Buy or Sell action',
-   '不存在买入或卖出的依据'],
-  ['is slightly above the last traded price of',
-   '略高于上一笔成交价'],
-  ['The current price of',
-   '当前价格'],
-  ['The 2% sell fee is not a factor here since no sell transaction is being considered.',
-   '由于不考虑卖出操作,此处 2% 卖出手续费不构成影响因素。'],
-  ['There is no expected gain to capture given the zero position.',
-   '在零仓位的情况下,没有可获得的预期收益。'],
-  ['Without an optimal position ratio indicating a target allocation change',
-   '在没有最优仓位比例指示目标配置变化的情况下'],
-  ['does not justify', '不足以支撑'],
-  ['is not a factor', '不是影响因素'],
-  [' but ', ' 但 '],
-  [' and given that ', ' 且鉴于 '],
-  [' and ', ' 并且 '],
-];
-function tr(s) {
-  if (!s) return '';
-  var out = s;
-  for (var i = 0; i < _trSentences.length; i++) {
-    out = out.split(_trSentences[i][0]).join(_trSentences[i][1]);
-  }
-  for (var k in _trMap) {
-    out = out.split(k).join(_trMap[k]);
-  }
-  out = out.replace(/which means there is no/g, '意味着没有');
-  out = out.replace(/would incur a/g, '将产生');
-  out = out.replace(/per share/g, '每股');
-  out = out.replace(/any Sell would/g, '任何卖出都会');
-  out = out.replace(/\s{2,}/g, ' ').trim();
-  var enCount = (out.match(/[a-zA-Z]{3,}/g) || []).length;
-  if (enCount > 6) return s;
-  return out;
-}
-
-function holdingBadge(action) {
-  const m = {
-    'Buy': '<span class="badge badge-buy">买入</span>',
-    'Sell': '<span class="badge badge-sell">卖出</span>',
-    'Hold': '<span class="badge badge-hold">持有</span>',
+  // 常见英文术语 -> 中文映射(兜底,新跑的分析直接输出中文)
+  var _trMap = {
+    "Tradable shares": "可交易数量",
+    "Holding Shares": "持仓数量",
+    "Current Price": "当前价格",
+    position: "仓位",
+    shares: "份额",
+    "sell fee": "卖出手续费",
+    buy: "买入",
+    sell: "卖出",
+    hold: "持有",
+    Hold: "持有",
+    Buy: "买入",
+    Sell: "卖出",
+    "expected gain": "预期收益",
+    "expected profit": "预期利润",
+    upward: "向上",
+    downward: "向下",
+    " Bullish ": " 看涨 ",
+    " Bearish ": " 看跌 ",
+    " Neutral ": " 中性 ",
+    "no position": "无仓位",
+    optimal: "最优",
+    allocation: "配置",
+    trend: "趋势",
+    support: "支撑",
+    resistance: "阻力",
+    volume: "成交量",
+    momentum: "动量",
+    breakout: "突破",
+    oversold: "超卖",
+    overbought: "超买",
+    sideways: "横盘",
+    conservative: "保守",
+    fallback: "兜底",
+    unavailable: "不可用",
+    appropriate: "合适的",
+    justify: "值得",
+    incur: "产生",
+    "Given that": "鉴于",
+    without: "没有",
+    basis: "依据",
+    factor: "因素",
+    impact: "影响",
+    positive: "正",
+    negative: "负",
+    decision: "决策",
+    analysis: "分析",
+    risk: "风险",
+    profit: "利润",
+    loss: "亏损",
+    fee: "手续费",
+    "per share": "每股",
+    "not a factor": "不是影响因素",
+    "is no": "没有",
+    "There is no": "没有",
+    "meaning there is": "意味着没有",
   };
-  return m[action] || '<span class="badge badge-neutral">' + escapeHtml(action) + '</span>';
-}
-
-function holdingLabel(h) {
-  const cls = {
-    '补仓': 'badge-buy', '建仓': 'badge-buy',
-    '离场': 'badge-sell', '继续持有': 'badge-hold',
-  }[h] || 'badge-neutral';
-  return '<span class="badge ' + cls + '">' + escapeHtml(h) + '</span>';
-}
-
-function signalBadge(s) {
-  const m = {
-    'Bullish': 'badge-bullish', 'bullish': 'badge-bullish',
-    'Bearish': 'badge-bearish', 'bearish': 'badge-bearish',
-  };
-  const cls = m[s] || 'badge-neutral';
-  return '<span class="badge ' + cls + '">' + escapeHtml(s || 'N/A') + '</span>';
-}
-
-async function loadStatus() {
-  try {
-    const r = await fetchJSON('/api/today-advisor/status');
-    renderWarmup(r.warmup);
-    renderRun(r.run);
-  } catch (e) {
-    showToast(e.message, 'error');
+  // 整段固定模式 -> 中文(hold 类理由的常见句式)
+  var _trSentences = [
+    [
+      "Tradable shares are 0.0, which means there is no position to adjust.",
+      "可交易数量为 0,意味着没有需要调整的仓位。",
+    ],
+    [
+      "Tradable shares are 0, which means there is no position to adjust.",
+      "可交易数量为 0,意味着没有需要调整的仓位。",
+    ],
+    [
+      "With zero holding shares and zero tradable shares, there is no basis for a Buy or Sell action.",
+      "由于持仓数量和可交易数量都为 0,不存在买入或卖出的依据。",
+    ],
+    [
+      "With no holdings and no tradable shares available, the optimal action is to Hold.",
+      "没有持仓也没有可交易数量,最优操作是继续持有。",
+    ],
+    [
+      "without an optimal position ratio indicating a target allocation change",
+      "没有最优仓位比例指示需要调整目标配置",
+    ],
+    [
+      "any Sell would incur a 2% fee ($4.16 per share), the expected gain does not justify entering a position.",
+      "任何卖出都会产生 2% 手续费(每股 ¥4.16),预期收益不足以支撑建仓。",
+    ],
+    [
+      "the expected gain does not justify entering a position",
+      "预期收益不足以支撑建仓",
+    ],
+    ["Holding is the appropriate decision", "继续持有是合适的决策"],
+    ["there is no basis for a Buy or Sell action", "不存在买入或卖出的依据"],
+    ["is slightly above the last traded price of", "略高于上一笔成交价"],
+    ["The current price of", "当前价格"],
+    [
+      "The 2% sell fee is not a factor here since no sell transaction is being considered.",
+      "由于不考虑卖出操作,此处 2% 卖出手续费不构成影响因素。",
+    ],
+    [
+      "There is no expected gain to capture given the zero position.",
+      "在零仓位的情况下,没有可获得的预期收益。",
+    ],
+    [
+      "Without an optimal position ratio indicating a target allocation change",
+      "在没有最优仓位比例指示目标配置变化的情况下",
+    ],
+    ["does not justify", "不足以支撑"],
+    ["is not a factor", "不是影响因素"],
+    [" but ", " 但 "],
+    [" and given that ", " 且鉴于 "],
+    [" and ", " 并且 "],
+  ];
+  function tr(s) {
+    if (!s) return "";
+    var out = s;
+    for (var i = 0; i < _trSentences.length; i++) {
+      out = out.split(_trSentences[i][0]).join(_trSentences[i][1]);
+    }
+    for (var k in _trMap) {
+      out = out.split(k).join(_trMap[k]);
+    }
+    out = out.replace(/which means there is no/g, "意味着没有");
+    out = out.replace(/would incur a/g, "将产生");
+    out = out.replace(/per share/g, "每股");
+    out = out.replace(/any Sell would/g, "任何卖出都会");
+    out = out.replace(/\s{2,}/g, " ").trim();
+    var enCount = (out.match(/[a-zA-Z]{3,}/g) || []).length;
+    if (enCount > 6) return s;
+    return out;
   }
-}
 
-async function loadResults() {
-  try {
-    const r = await fetchJSON('/api/today-advisor');
-    document.getElementById('date-label').textContent = r.date || '';
-    renderDecisions(r.decisions || []);
-    renderPending(r.pending || []);
-  } catch (e) {
-    showToast(e.message, 'error');
+  function holdingBadge(action) {
+    const m = {
+      Buy: '<span class="badge badge-buy">买入</span>',
+      Sell: '<span class="badge badge-sell">卖出</span>',
+      Hold: '<span class="badge badge-hold">持有</span>',
+    };
+    return (
+      m[action] ||
+      '<span class="badge badge-neutral">' + escapeHtml(action) + "</span>"
+    );
   }
-}
 
-function renderWarmup(w) {
-  const total = w.total || 0;
-  let done = w.done || 0;
-  let inProgress = false;
-  if (w.running && w.state) {
-    inProgress = true;
-    const stDone = w.state.items_done || 0;
-    const stSkip = w.state.items_skipped || 0;
-    const stTotal = w.state.items_total || total;
-    if (stTotal) done = stDone + stSkip;
+  function holdingLabel(h) {
+    const cls =
+      {
+        补仓: "badge-buy",
+        建仓: "badge-buy",
+        离场: "badge-sell",
+        继续持有: "badge-hold",
+      }[h] || "badge-neutral";
+    return '<span class="badge ' + cls + '">' + escapeHtml(h) + "</span>";
   }
-  const pct = total ? Math.round(done / total * 100) : 0;
-  document.getElementById('warmup-bar').style.width = pct + '%';
-  document.getElementById('warmup-text').textContent =
-    '共 ' + total + ' 个 · 已准备 ' + done + ' · 等待 ' + (w.pending || 0) +
-    ' · 失败 ' + (w.errors || 0);
-  const badge = document.getElementById('warmup-badge');
-  if (!total) { badge.textContent = '库存为空'; badge.className = 'badge badge-hold'; }
-  else if (w.ready) { badge.textContent = '已就绪'; badge.className = 'badge badge-bullish'; }
-  else if (inProgress) { badge.textContent = '准备中'; badge.className = 'badge badge-neutral'; }
-  else if (w.errors > 0) { badge.textContent = '部分失败'; badge.className = 'badge badge-bearish'; }
-  else { badge.textContent = '等待准备'; badge.className = 'badge badge-neutral'; }
 
-  const box = document.getElementById('warmup-items');
-  box.innerHTML = '';
-  for (const it of (w.items || [])) {
-    const cls = { done: 'up', pending: 'muted', error: 'down' }[it.status] || 'muted';
-    const icon = { done: '✓', pending: '⏳', error: '✗' }[it.status] || '?';
-    const el = document.createElement('div');
-    el.className = 'flex items-center gap-2 text-xs ' + cls;
-    el.innerHTML = '<span>' + icon + '</span><span class="mono truncate">' + escapeHtml(it.item) + '</span>';
-    box.appendChild(el);
+  function signalBadge(s) {
+    const m = {
+      Bullish: "badge-bullish",
+      bullish: "badge-bullish",
+      Bearish: "badge-bearish",
+      bearish: "badge-bearish",
+    };
+    const cls = m[s] || "badge-neutral";
+    return (
+      '<span class="badge ' + cls + '">' + escapeHtml(s || "N/A") + "</span>"
+    );
   }
-}
 
-function renderRun(run) {
-  const card = document.getElementById('run-card');
-  if (!run || !run.running && !run.result && !run.error) {
-    card.style.display = 'none';
-    return;
+  async function loadStatus() {
+    try {
+      const r = await fetchJSON("/api/today-advisor/status");
+      renderWarmup(r.warmup);
+      renderRun(r.run);
+    } catch (e) {
+      showToast(e.message, "error");
+    }
   }
-  card.style.display = '';
-  document.getElementById('run-phase').textContent = run.phase || '-';
-  document.getElementById('run-current').textContent = run.current_item || '-';
-  document.getElementById('run-progress').textContent = (run.items_done || 0) + ' / ' + (run.items_total || 0);
-  const resEl = document.getElementById('run-result');
-  resEl.textContent = run.result || (run.running ? '运行中…' : '-');
-  const errEl = document.getElementById('run-error');
-  if (run.error) {
-    errEl.textContent = '错误: ' + run.error;
-    errEl.style.display = '';
-  } else {
-    errEl.style.display = 'none';
-  }
-}
 
-function renderDecisions(decisions) {
-  const box = document.getElementById('decisions-list');
-  box.innerHTML = '';
-  const empty = document.getElementById('empty-decisions');
-  if (!decisions.length) { empty.style.display = ''; return; }
-  empty.style.display = 'none';
-  for (const d of decisions) {
-    const card = document.createElement('div');
-    card.className = 'decision-card';
-    card.innerHTML = `
+  async function loadResults() {
+    try {
+      const r = await fetchJSON("/api/today-advisor");
+      document.getElementById("date-label").textContent = r.date || "";
+      renderDecisions(r.decisions || []);
+      renderPending(r.pending || []);
+    } catch (e) {
+      showToast(e.message, "error");
+    }
+  }
+
+  function renderWarmup(w) {
+    const total = w.total || 0;
+    let done = w.done || 0;
+    let inProgress = false;
+    if (w.running && w.state) {
+      inProgress = true;
+      const stDone = w.state.items_done || 0;
+      const stSkip = w.state.items_skipped || 0;
+      const stTotal = w.state.items_total || total;
+      if (stTotal) done = stDone + stSkip;
+    }
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    document.getElementById("warmup-bar").style.width = pct + "%";
+    document.getElementById("warmup-text").textContent =
+      "共 " +
+      total +
+      " 个 · 已准备 " +
+      done +
+      " · 等待 " +
+      (w.pending || 0) +
+      " · 失败 " +
+      (w.errors || 0);
+    const badge = document.getElementById("warmup-badge");
+    if (!total) {
+      badge.textContent = "库存为空";
+      badge.className = "badge badge-hold";
+    } else if (w.ready) {
+      badge.textContent = "已就绪";
+      badge.className = "badge badge-bullish";
+    } else if (inProgress) {
+      badge.textContent = "准备中";
+      badge.className = "badge badge-neutral";
+    } else if (w.errors > 0) {
+      badge.textContent = "部分失败";
+      badge.className = "badge badge-bearish";
+    } else {
+      badge.textContent = "等待准备";
+      badge.className = "badge badge-neutral";
+    }
+
+    const box = document.getElementById("warmup-items");
+    box.innerHTML = "";
+    for (const it of w.items || []) {
+      const cls =
+        { done: "up", pending: "muted", error: "down" }[it.status] || "muted";
+      const icon = { done: "✓", pending: "⏳", error: "✗" }[it.status] || "?";
+      const el = document.createElement("div");
+      el.className = "flex items-center gap-2 text-xs " + cls;
+      el.innerHTML =
+        "<span>" +
+        icon +
+        '</span><span class="mono truncate">' +
+        escapeHtml(it.item) +
+        "</span>";
+      box.appendChild(el);
+    }
+  }
+
+  function renderRun(run) {
+    const card = document.getElementById("run-card");
+    if (!run || (!run.running && !run.result && !run.error)) {
+      card.style.display = "none";
+      return;
+    }
+    card.style.display = "";
+    document.getElementById("run-phase").textContent = run.phase || "-";
+    document.getElementById("run-current").textContent =
+      run.current_item || "-";
+    document.getElementById("run-progress").textContent =
+      (run.items_done || 0) + " / " + (run.items_total || 0);
+
+    // 进度条
+    const total = run.items_total || 0;
+    const done = run.items_done || 0;
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    document.getElementById("run-bar").style.width = pct + "%";
+
+    // 加载转圈提示:分析中显示,结束后隐藏
+    const loading = document.getElementById("run-loading");
+    const loadingText = document.getElementById("run-loading-text");
+    if (run.running) {
+      loading.style.display = "";
+      if (run.phase === "warmup") {
+        loadingText.textContent = "正在准备行情数据(截图 K 线)";
+      } else if (run.phase === "analysis") {
+        loadingText.textContent = run.current_item
+          ? "正在调用 AI 分析: " + run.current_item
+          : "正在调用 AI 分析";
+      } else {
+        loadingText.textContent = "正在准备";
+      }
+    } else {
+      loading.style.display = "none";
+    }
+
+    const resEl = document.getElementById("run-result");
+    resEl.textContent = run.result || (run.running ? "运行中…" : "-");
+    const errEl = document.getElementById("run-error");
+    if (run.error) {
+      errEl.textContent = "错误: " + run.error;
+      errEl.style.display = "";
+    } else {
+      errEl.style.display = "none";
+    }
+  }
+
+  function renderDecisions(decisions) {
+    const box = document.getElementById("decisions-list");
+    box.innerHTML = "";
+    const empty = document.getElementById("empty-decisions");
+    if (!decisions.length) {
+      empty.style.display = "";
+      return;
+    }
+    empty.style.display = "none";
+    for (const d of decisions) {
+      const card = document.createElement("div");
+      card.className = "decision-card";
+      card.innerHTML = `
       <div class="flex items-center justify-between flex-wrap gap-2 mb-2">
         <div class="mono text-sm" style="color:var(--text-1);">${escapeHtml(d.item_name_cn || d.item_name)}</div>
         <div class="flex items-center gap-2">
           ${holdingBadge(d.action)}
           <span class="text-xs muted">→</span>
           ${holdingLabel(d.holding_action)}
-          ${d.signal ? signalBadge(d.signal) : ''}
+          ${d.signal ? signalBadge(d.signal) : ""}
         </div>
       </div>
       <div class="grid-3 text-xs muted mb-2" style="margin-top:8px;">
@@ -257,71 +390,88 @@ function renderDecisions(decisions) {
         <div>参考价: <span class="mono" style="color:var(--text-1);">${fmtMoney(d.price)}</span></div>
         <div>日期: <span class="mono" style="color:var(--text-1);">${d.trading_date}</span></div>
       </div>
-      <div class="justify-box">${escapeHtml(tr(d.justification || ''))}</div>
+      <div class="justify-box">${escapeHtml(tr(d.justification || ""))}</div>
     `;
-    box.appendChild(card);
-  }
-}
-
-function renderPending(pending) {
-  const box = document.getElementById('pending-list');
-  box.innerHTML = '';
-  if (!pending.length) return;
-  const title = document.createElement('div');
-  title.className = 'text-xs muted' ;
-  title.textContent = '尚无今日建议 (' + pending.length + ')';
-  box.appendChild(title);
-  for (const p of pending) {
-    const el = document.createElement('div');
-    el.className = 'text-sm muted mono';
-    el.innerHTML = '⏳ ' + escapeHtml(p.item_name_cn || p.item_name) + ' <span class="text-xs">(持仓 ' + p.shares + ')</span>';
-    box.appendChild(el);
-  }
-}
-
-async function triggerRun() {
-  const btn = document.getElementById('btn-run');
-  btn.disabled = true; btn.textContent = '启动中...';
-  try {
-    const r = await fetchJSON('/api/today-advisor/run', { method: 'POST', body: JSON.stringify({}) });
-    if (r.ok) {
-      showToast('今日分析已启动(后台运行)', 'success');
-      startPolling();
-    } else {
-      showToast(r.error || '启动失败', 'error');
+      box.appendChild(card);
     }
-  } catch (e) {
-    showToast(e.message, 'error');
-  } finally {
-    btn.disabled = false; btn.textContent = '运行今日分析';
   }
-}
 
-function startPolling() {
-  if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(async () => {
-    await loadStatus();
-    await loadResults();
-    const run = await fetchJSON('/api/today-advisor/status');
-    if (!run.run.running) {
-      clearInterval(pollTimer); pollTimer = null;
-      showToast('今日分析已结束', run.run.result === 'success' ? 'success' : 'error');
+  function renderPending(pending) {
+    const box = document.getElementById("pending-list");
+    box.innerHTML = "";
+    if (!pending.length) return;
+    const title = document.createElement("div");
+    title.className = "text-xs muted";
+    title.textContent = "尚无今日建议 (" + pending.length + ")";
+    box.appendChild(title);
+    for (const p of pending) {
+      const el = document.createElement("div");
+      el.className = "text-sm muted mono";
+      el.innerHTML =
+        "⏳ " +
+        escapeHtml(p.item_name_cn || p.item_name) +
+        ' <span class="text-xs">(持仓 ' +
+        p.shares +
+        ")</span>";
+      box.appendChild(el);
     }
-  }, 5000);
-}
+  }
 
-document.getElementById('btn-refresh').addEventListener('click', () => { loadStatus(); loadResults(); });
-document.getElementById('btn-run').addEventListener('click', triggerRun);
+  async function triggerRun() {
+    const btn = document.getElementById("btn-run");
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner spinner-sm"></span>启动中...';
+    try {
+      const r = await fetchJSON("/api/today-advisor/run", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      if (r.ok) {
+        showToast("今日分析已启动(后台运行)", "success");
+        startPolling();
+      } else {
+        showToast(r.error || "启动失败", "error");
+      }
+    } catch (e) {
+      showToast(e.message, "error");
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = "运行今日分析";
+    }
+  }
 
-// initial load
-loadStatus();
-loadResults();
-// auto-poll if a run is already in progress
-(async () => {
-  try {
-    const s = await fetchJSON('/api/today-advisor/status');
-    if (s.run && s.run.running) startPolling();
-  } catch (e) {}
-})();
+  function startPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+      await loadStatus();
+      await loadResults();
+      const run = await fetchJSON("/api/today-advisor/status");
+      if (!run.run.running) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        showToast(
+          "今日分析已结束",
+          run.run.result === "success" ? "success" : "error",
+        );
+      }
+    }, 5000);
+  }
+
+  document.getElementById("btn-refresh").addEventListener("click", () => {
+    loadStatus();
+    loadResults();
+  });
+  document.getElementById("btn-run").addEventListener("click", triggerRun);
+
+  // initial load
+  loadStatus();
+  loadResults();
+  // auto-poll if a run is already in progress
+  (async () => {
+    try {
+      const s = await fetchJSON("/api/today-advisor/status");
+      if (s.run && s.run.running) startPolling();
+    } catch (e) {}
+  })();
 </script>
 {% endblock %}

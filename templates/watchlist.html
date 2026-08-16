@@ -24,7 +24,7 @@
         手动添加
       </button>
       <button type="button" id="btn-scan" class="btn btn-ghost">
-        扫码识别
+        图像导入
       </button>
       <input
         id="scan-file"
@@ -117,14 +117,25 @@
   </div>
 </div>
 
-<!-- 扫码识别候选弹窗 -->
+<!-- 图像导入候选弹窗 -->
 <div id="scan-modal" class="scan-modal" style="display: none">
   <div class="scan-modal-box">
     <div class="card-title">
-      <h3>选择识别到的饰品</h3>
+      <h3>选择识别到的饰品(可多选)</h3>
       <button id="scan-close" class="btn btn-ghost btn-sm">关闭</button>
     </div>
     <div id="scan-candidates"></div>
+    <div class="flex gap-2" style="margin-top: 12px">
+      <button id="scan-select-all" class="btn btn-ghost btn-sm">全选</button>
+      <button
+        id="scan-add-selected"
+        class="btn btn-primary btn-sm"
+        style="flex: 1"
+        disabled
+      >
+        批量添加选中 (0)
+      </button>
+    </div>
   </div>
 </div>
 {% endblock %} {% block scripts %}
@@ -236,10 +247,18 @@
     }
   });
 
-  // ---- 扫码识别 ----
+  // ---- 图像导入:一张图可识别多个饰品,支持多选批量添加 ----
   const btnScan = document.getElementById('btn-scan');
   const scanFile = document.getElementById('scan-file');
   const scanModal = document.getElementById('scan-modal');
+  const scanAddBtn = document.getElementById('scan-add-selected');
+  const scanSelectAll = document.getElementById('scan-select-all');
+
+  function updateScanAddBtn() {
+    const n = document.querySelectorAll('#scan-candidates .pick-check:checked').length;
+    scanAddBtn.disabled = n === 0;
+    scanAddBtn.textContent = '批量添加选中 (' + n + ')';
+  }
 
   async function uploadImage(file) {
     const fd = new FormData();
@@ -251,29 +270,80 @@
     return data;
   }
 
-  function renderCandidates(cands, query) {
+  function renderCandidates(results) {
     const box = document.getElementById('scan-candidates');
     box.innerHTML = '';
-    if (!cands.length) {
-      box.innerHTML = '<div class="empty">未匹配到饰品。识别到的名称: ' + escapeHtml(query || '(空)') + '</div>';
-    } else {
+    if (!results || !results.length) {
+      box.innerHTML = '<div class="empty">未识别到饰品名称,请换一张更清晰的图片</div>';
+      scanModal.style.display = '';
+      return;
+    }
+    for (const group of results) {
+      const q = group.query || '';
+      const cands = group.candidates || [];
+      const title = document.createElement('div');
+      title.className = 'text-xs muted';
+      title.style.margin = '10px 0 4px';
+      title.style.fontWeight = '600';
+      title.textContent = '识别: ' + q;
+      box.appendChild(title);
+      if (!cands.length) {
+        const none = document.createElement('div');
+        none.className = 'empty';
+        none.textContent = '未匹配到饰品';
+        box.appendChild(none);
+        continue;
+      }
       for (const c of cands) {
-        const el = document.createElement('div');
+        const el = document.createElement('label');
         el.className = 'scan-cand';
+        el.style.cursor = 'pointer';
         el.innerHTML = `
-          <div style="min-width:0;">
+          <input type="checkbox" class="pick-check" data-name="${escapeHtml(c.marketHashName)}" style="flex-shrink:0">
+          <div style="min-width:0; flex:1;">
             <div class="text-sm" style="color:var(--text-1);">${escapeHtml(c.name || c.marketHashName)}</div>
             <div class="mono text-xs muted truncate">${escapeHtml(c.marketHashName)}</div>
-          </div>
-          <button class="btn btn-primary btn-sm pick-cand" data-name="${escapeHtml(c.marketHashName)}">添加</button>`;
+          </div>`;
         box.appendChild(el);
       }
-      box.querySelectorAll('.pick-cand').forEach(b => b.addEventListener('click', () => {
-        scanModal.style.display = 'none';
-        addItem(b.dataset.name);
-      }));
     }
+    // 整行点击切换勾选
+    box.querySelectorAll('.scan-cand').forEach(row => {
+      const cb = row.querySelector('.pick-check');
+      row.addEventListener('click', (e) => {
+        if (e.target.tagName === 'INPUT') return;
+        cb.checked = !cb.checked;
+        updateScanAddBtn();
+      });
+      cb.addEventListener('change', updateScanAddBtn);
+    });
+    updateScanAddBtn();
     scanModal.style.display = '';
+  }
+
+  async function addMany(names) {
+    if (!names.length) return;
+    scanAddBtn.disabled = true;
+    scanAddBtn.textContent = '添加中...';
+    try {
+      const r = await fetchJSON('/api/watchlist/add-many', {
+        method: 'POST',
+        body: JSON.stringify({ names }),
+      });
+      const added = r.added || [];
+      const failed = r.failed || [];
+      const existing = r.existing || 0;
+      if (added.length) showToast('已添加 ' + added.length + ' 个饰品', 'success');
+      if (existing) showToast(existing + ' 个已在关注列表中,跳过', 'info');
+      if (failed.length) showToast('失败 ' + failed.length + ' 个: ' + failed[0].error, 'error');
+      scanModal.style.display = 'none';
+      if (added.length) setTimeout(() => location.reload(), 800);
+    } catch (e) {
+      showToast(e.message, 'error');
+    } finally {
+      scanAddBtn.disabled = false;
+      updateScanAddBtn();
+    }
   }
 
   btnScan.addEventListener('click', () => scanFile.click());
@@ -281,14 +351,33 @@
     const f = scanFile.files[0];
     scanFile.value = '';
     if (!f) return;
-    showToast('正在识别图片...', 'info');
+    btnScan.disabled = true;
+    btnScan.innerHTML = '<span class="spinner spinner-sm"></span>识别中';
+    showToast('正在识别图片,请稍候...', 'info');
     try {
       const r = await uploadImage(f);
-      renderCandidates(r.candidates || [], r.query || '');
+      renderCandidates(r.results || []);
     } catch (e) {
       showToast(e.message, 'error');
+    } finally {
+      btnScan.disabled = false;
+      btnScan.textContent = '图像导入';
     }
   });
+
+  scanAddBtn.addEventListener('click', () => {
+    const names = Array.from(document.querySelectorAll('#scan-candidates .pick-check:checked'))
+      .map(cb => cb.dataset.name);
+    addMany(names);
+  });
+
+  scanSelectAll.addEventListener('click', () => {
+    const cbs = document.querySelectorAll('#scan-candidates .pick-check');
+    const all = Array.from(cbs).every(cb => cb.checked);
+    cbs.forEach(cb => { cb.checked = !all; });
+    updateScanAddBtn();
+  });
+
   document.getElementById('scan-close').addEventListener('click', () => {
     scanModal.style.display = 'none';
   });

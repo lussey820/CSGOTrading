@@ -21,3 +21,9 @@ pydantic==2.12.5
 python-dotenv==1.2.1
 PyYAML==6.0.3
 typing_extensions==4.15.0
+
+# Web Dashboard
+Flask==3.0.3
+
+# Vision analyst - chart screenshot rendering
+playwright>=1.50.0

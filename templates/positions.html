@@ -1,0 +1,128 @@
+{% extends "base.html" %} {% block title %}持仓与净值 · CS2 交易助手{% endblock
+%} {% block content %}
+<div class="page-gap">
+  <div class="page-head">
+    <div>
+      <h1>持仓与净值</h1>
+      <p class="sub">基于你的真实库存实时估值,查看市值、盈亏与持仓占比。</p>
+    </div>
+    <div class="flex gap-3">
+      <button id="btn-refresh" class="btn btn-ghost">刷新</button>
+    </div>
+  </div>
+
+  <!-- KPI -->
+  <div class="kpi-grid">
+    <div class="glass">
+      <div class="kpi-label">最新总资产(库存市值)</div>
+      <div id="kpi-total" class="kpi-value">
+        {% if inv_total_value is not none %}¥{{ "%.2f"|format(inv_total_value)
+        }}{% else %}--{% endif %}
+      </div>
+      <div class="kpi-sub">实时市值 · {{ inv_count }} 件饰品</div>
+    </div>
+    <div class="glass">
+      <div class="kpi-label">库存总盈亏</div>
+      <div id="kpi-pnl" class="kpi-value">
+        {% if inv_total_pnl is not none %}
+        <span class="{% if inv_total_pnl >= 0 %}up{% else %}down{% endif %}">
+          {{ "%+.2f"|format(inv_total_pnl) }}¥
+        </span>
+        {% if inv_total_cost %}({{ "%+.2f"|format(inv_total_pnl / inv_total_cost
+        * 100) }}%){% endif %} {% else %}--{% endif %}
+      </div>
+      <div class="kpi-sub">成本 ¥{{ "%.2f"|format(inv_total_cost or 0) }}</div>
+    </div>
+    <div class="glass">
+      <div class="kpi-label">库存饰品数</div>
+      <div id="kpi-count" class="kpi-value">{{ inv_count }}</div>
+      <div class="kpi-sub">持有种类</div>
+    </div>
+  </div>
+
+  <!-- Positions detail -->
+  <div class="glass">
+    <div class="card-title">
+      <h2>持仓明细</h2>
+      <span class="muted">按市值排序</span>
+    </div>
+    <div id="positions-table">
+      <div class="empty">加载中…</div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block scripts %}
+<script>
+  // 库存数据(含实时价),由后端注入
+  const ITEMS = {{ inv_items|tojson|safe }};
+
+  function fmtMoney(v) {
+    if (v == null) return '-';
+    if (typeof v !== 'number') v = parseFloat(v) || 0;
+    return '¥' + v.toFixed(2);
+  }
+
+  function renderPositions() {
+    const table = document.getElementById('positions-table');
+    if (!ITEMS.length) {
+      table.innerHTML = `<div class="empty">库存为空,去「我的库存」添加饰品</div>`;
+      return;
+    }
+    // 计算市值并排序
+    const rows = ITEMS.map(it => ({
+      ...it,
+      value: (it.current_price || 0) * it.shares,
+    })).sort((a, b) => b.value - a.value);
+
+    const totalValue = rows.reduce((s, r) => s + r.value, 0);
+    let html = `
+      <div class="table-wrap">
+      <table class="glass-table">
+        <thead>
+          <tr>
+            <th>饰品</th>
+            <th class="num">数量</th>
+            <th class="num">买入价</th>
+            <th class="num">当前价</th>
+            <th class="num">市值</th>
+            <th class="num">占比</th>
+            <th class="num">总盈亏</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+    rows.forEach(r => {
+      const pct = totalValue ? (r.value / totalValue * 100) : 0;
+      html += `
+        <tr>
+          <td class="mono">${escapeHtml(r.item_name_cn || r.item_name)}</td>
+          <td class="num">${r.shares}</td>
+          <td class="num">${fmtMoney(r.buy_price)}</td>
+          <td class="num">${fmtMoney(r.current_price)}</td>
+          <td class="num">${fmtMoney(r.value)}</td>
+          <td class="num">${pct.toFixed(1)}%</td>
+          <td class="num ${colorClass(r.total_pnl)}">${fmtMoney(r.total_pnl)}</td>
+        </tr>
+      `;
+    });
+    html += `
+        </tbody>
+        <tfoot>
+          <tr>
+            <td>总计</td>
+            <td colspan="3"></td>
+            <td class="num">${fmtMoney(totalValue)}</td>
+            <td class="num">100%</td>
+            <td class="num"></td>
+          </tr>
+        </tfoot>
+      </table>
+      </div>
+    `;
+    table.innerHTML = html;
+  }
+
+  renderPositions();
+  document.getElementById('btn-refresh').addEventListener('click', () => location.reload());
+</script>
+{% endblock %}

@@ -1,17 +1,31 @@
-{% extends "base.html" %}
-{% block title %}AI持仓 · CS2 交易助手{% endblock %}
-
+{% extends "base.html" %} {% block title %}AI持仓 · CS2 交易助手{% endblock %}
 {% block content %}
 <div class="page-gap">
   <div class="page-head">
     <div>
       <h1>AI 持仓盈亏</h1>
-      <p class="sub">这是 AI 的模拟买卖账户:自动分析行情并买卖,卖出按市场价结算并扣除 2% 手续费,盈亏自动记录。</p>
+      <p class="sub">
+        这是 AI 的模拟买卖账户:自动分析行情并买卖,卖出按市场价结算并扣除 2%
+        手续费,盈亏自动记录。
+      </p>
     </div>
     <div class="flex gap-3">
-      <button id="btn-ai-run" class="btn">运行 AI 账户</button>
+      <button id="btn-seed-inventory" class="btn btn-ghost">
+        复制我的库存
+      </button>
+      <button id="btn-ai-run" class="btn btn-run-progress">
+        <span class="btn-label">运行 AI 账户</span>
+        <span class="btn-progress"></span>
+      </button>
     </div>
   </div>
+
+  <!-- 上次运行状态横幅 -->
+  <div
+    id="run-banner"
+    class="glass"
+    style="display: none; padding: 12px 16px"
+  ></div>
 
   <!-- KPI -->
   <div class="kpi-grid">
@@ -48,6 +62,7 @@
           <tr>
             <th>饰品</th>
             <th class="num">数量</th>
+            <th class="num">可卖(7天CD)</th>
             <th class="num">买入价</th>
             <th class="num">当前价</th>
             <th class="num">未实现盈亏</th>
@@ -57,7 +72,7 @@
         <tbody id="holdings-tbody"></tbody>
       </table>
     </div>
-    <div id="holdings-empty" class="empty" style="display:none;">库存为空</div>
+    <div id="holdings-empty" class="empty" style="display: none">库存为空</div>
   </div>
 
   <!-- Per-item realized -->
@@ -80,7 +95,9 @@
         <tbody id="per-item-tbody"></tbody>
       </table>
     </div>
-    <div id="per-item-empty" class="empty" style="display:none;">尚无卖出记录</div>
+    <div id="per-item-empty" class="empty" style="display: none">
+      尚无卖出记录
+    </div>
   </div>
 
   <!-- Trades detail -->
@@ -105,90 +122,132 @@
         <tbody id="trades-tbody"></tbody>
       </table>
     </div>
-    <div id="trades-empty" class="empty" style="display:none;">尚无交易记录</div>
+    <div id="trades-empty" class="empty" style="display: none">
+      尚无交易记录
+    </div>
   </div>
 </div>
-{% endblock %}
 
-{% block scripts %}
+<!-- 导入我的库存弹窗 -->
+<div id="seed-modal" class="scan-modal" style="display: none">
+  <div class="scan-modal-box">
+    <div class="card-title">
+      <h3>导入我的库存到 AI 持仓</h3>
+      <button id="seed-close" class="btn btn-ghost btn-sm">关闭</button>
+    </div>
+    <div id="seed-list"></div>
+    <div class="flex gap-2" style="margin-top: 12px">
+      <button id="seed-select-all" class="btn btn-ghost btn-sm">全选</button>
+      <button
+        id="seed-import"
+        class="btn btn-primary btn-sm"
+        style="flex: 1"
+        disabled
+      >
+        导入选中 (0)
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block scripts %}
 <script>
-async function loadAll() {
-  try {
-    const r = await fetchJSON('/api/ai-trader');
-    if (!r.ok && r.ok !== undefined) throw new Error(r.error || 'load failed');
-    renderKPI(r);
-    renderHoldings(r.holdings || []);
-    renderPerItem(r.per_item || []);
-    renderTrades(r.trades || []);
-  } catch (e) {
-    showToast(e.message, 'error');
+  async function loadAll(withMarket = true) {
+    try {
+      const [r, st] = await Promise.all([
+        fetchJSON("/api/ai-trader" + (withMarket ? "" : "?no-market=1")),
+        fetchJSON("/api/ai-account/status").catch(() => null),
+      ]);
+      if (!r.ok && r.ok !== undefined)
+        throw new Error(r.error || "load failed");
+      renderKPI(r);
+      renderHoldings(r.holdings || []);
+      renderPerItem(r.per_item || []);
+      renderTrades(r.trades || []);
+      renderRunBanner(st);
+      // 页面打开时若正在运行,直接进入轮询显示按钮进度
+      if (st && st.running) startAiPolling();
+      return r;
+    } catch (e) {
+      showToast(e.message, "error");
+      return null;
+    }
   }
-}
 
-function renderKPI(r) {
-  const setEl = (id, val, colorVal) => {
-    const el = document.getElementById(id);
-    el.textContent = fmtMoney(val);
-    if (colorVal !== undefined) el.className = 'kpi-value ' + colorClass(colorVal);
-  };
-  setEl('kpi-realized', r.total_realized_pnl, r.total_realized_pnl);
-  setEl('kpi-unrealized', r.total_unrealized_pnl, r.total_unrealized_pnl);
-  setEl('kpi-total', r.total_pnl, r.total_pnl);
-  setEl('kpi-fee', r.total_fee_paid, null);
-  document.getElementById('kpi-trades').textContent = r.trade_count || 0;
-}
+  function renderKPI(r) {
+    const setEl = (id, val, colorVal) => {
+      const el = document.getElementById(id);
+      el.textContent = fmtMoney(val);
+      if (colorVal !== undefined)
+        el.className = "kpi-value " + colorClass(colorVal);
+    };
+    setEl("kpi-realized", r.total_realized_pnl, r.total_realized_pnl);
+    setEl("kpi-unrealized", r.total_unrealized_pnl, r.total_unrealized_pnl);
+    setEl("kpi-total", r.total_pnl, r.total_pnl);
+    setEl("kpi-fee", r.total_fee_paid, null);
+    document.getElementById("kpi-trades").textContent = r.trade_count || 0;
+  }
 
-function renderHoldings(rows) {
-  const tbody = document.getElementById('holdings-tbody');
-  const empty = document.getElementById('holdings-empty');
-  tbody.innerHTML = '';
-  if (!rows.length) { empty.style.display = ''; return; }
-  empty.style.display = 'none';
-  for (const h of rows) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
+  function renderHoldings(rows) {
+    const tbody = document.getElementById("holdings-tbody");
+    const empty = document.getElementById("holdings-empty");
+    tbody.innerHTML = "";
+    if (!rows.length) {
+      empty.style.display = "";
+      return;
+    }
+    empty.style.display = "none";
+    for (const h of rows) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
       <td class="mono">${escapeHtml(h.item_name_cn || h.item_name)}</td>
       <td class="num">${h.shares}</td>
+      <td class="num muted">${h.available_shares != null ? h.available_shares : "-"}</td>
       <td class="num">${fmtMoney(h.buy_price)}</td>
       <td class="num">${h.current_price == null ? '<span class="muted">-</span>' : fmtMoney(h.current_price)}</td>
       <td class="num ${colorClass(h.unrealized_pnl)}">${fmtMoney(h.unrealized_pnl)}</td>
       <td class="num ${colorClass(h.unrealized_pnl_pct)}">${fmtPct(h.unrealized_pnl_pct)}</td>
     `;
-    tbody.appendChild(tr);
+      tbody.appendChild(tr);
+    }
   }
-}
 
-function renderPerItem(rows) {
-  const tbody = document.getElementById('per-item-tbody');
-  const empty = document.getElementById('per-item-empty');
-  tbody.innerHTML = '';
-  if (!rows.length) { empty.style.display = ''; return; }
-  empty.style.display = 'none';
-  for (const p of rows) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
+  function renderPerItem(rows) {
+    const tbody = document.getElementById("per-item-tbody");
+    const empty = document.getElementById("per-item-empty");
+    tbody.innerHTML = "";
+    if (!rows.length) {
+      empty.style.display = "";
+      return;
+    }
+    empty.style.display = "none";
+    for (const p of rows) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
       <td class="mono">${escapeHtml(p.item_name_cn || p.item_name)}</td>
       <td class="num">${p.trade_count}</td>
       <td class="num">${p.total_shares_sold}</td>
       <td class="num ${colorClass(p.total_realized_pnl)}">${fmtMoney(p.total_realized_pnl)}</td>
       <td class="num">${fmtMoney(p.total_fee)}</td>
-      <td class="num muted">${p.last_trade_date || '-'}</td>
+      <td class="num muted">${p.last_trade_date || "-"}</td>
     `;
-    tbody.appendChild(tr);
+      tbody.appendChild(tr);
+    }
   }
-}
 
-function renderTrades(rows) {
-  const tbody = document.getElementById('trades-tbody');
-  const empty = document.getElementById('trades-empty');
-  tbody.innerHTML = '';
-  if (!rows.length) { empty.style.display = ''; return; }
-  empty.style.display = 'none';
-  for (const t of rows) {
-    const tr = document.createElement('tr');
-    const decisionShort = t.decision_id ? t.decision_id.slice(0, 8) : '-';
-    tr.innerHTML = `
-      <td class="muted">${t.trade_date || '-'}</td>
+  function renderTrades(rows) {
+    const tbody = document.getElementById("trades-tbody");
+    const empty = document.getElementById("trades-empty");
+    tbody.innerHTML = "";
+    if (!rows.length) {
+      empty.style.display = "";
+      return;
+    }
+    empty.style.display = "none";
+    for (const t of rows) {
+      const tr = document.createElement("tr");
+      const decisionShort = t.decision_id ? t.decision_id.slice(0, 8) : "-";
+      tr.innerHTML = `
+      <td class="muted">${t.trade_date || "-"}</td>
       <td class="mono">${escapeHtml(t.item_name_cn || t.item_name)}</td>
       <td class="num">${t.shares}</td>
       <td class="num">${fmtMoney(t.buy_price)}</td>
@@ -197,51 +256,246 @@ function renderTrades(rows) {
       <td class="num ${colorClass(t.realized_pnl)}">${fmtMoney(t.realized_pnl)}</td>
       <td class="mono muted" style="font-size:12px;">${decisionShort}</td>
     `;
-    tbody.appendChild(tr);
+      tbody.appendChild(tr);
+    }
   }
-}
 
-let aiPollTimer = null;
+  let aiPollTimer = null;
 
-function startAiPolling() {
-  if (aiPollTimer) clearInterval(aiPollTimer);
-  aiPollTimer = setInterval(async () => {
-    try {
-      const s = await fetchJSON('/api/ai-account/status');
-      if (!s.running) {
-        clearInterval(aiPollTimer); aiPollTimer = null;
-        showToast('AI 账户分析已结束', s.last_ok ? 'success' : 'error');
-        await loadAll();
-      }
-    } catch (e) {}
-  }, 5000);
-}
-
-document.getElementById('btn-ai-run').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-ai-run');
-  btn.disabled = true; btn.textContent = '运行中...';
-  try {
-    // 已在运行:转为轮询,结束后自动刷新
-    const st = await fetchJSON('/api/ai-account/status');
-    if (st.running) {
-      showToast('AI 账户运行中,完成后自动刷新', 'info');
-      startAiPolling();
+  // 上次运行状态横幅
+  function renderRunBanner(s) {
+    const banner = document.getElementById("run-banner");
+    if (!s || !s.finished_at) {
+      banner.style.display = "none";
       return;
     }
-    const r = await fetchJSON('/api/ai-account/run', { method: 'POST', body: '{}' });
-    if (r.ok) {
-      showToast('AI 账户分析已启动(后台运行)', 'success');
-      startAiPolling();
-    } else {
-      showToast(r.error || '启动失败', 'error');
+    const time = (s.finished_at || "").replace("T", " ").slice(0, 19);
+    if (s.running) {
+      banner.style.display = "";
+      banner.innerHTML =
+        '<span class="spinner"></span> <b>AI 账户正在运行中</b>,开始于 ' +
+        escapeHtml(s.started_at || "") +
+        ' <span class="ellipsis"></span>';
+      return;
     }
-  } catch (e) {
-    showToast('启动失败: ' + e.message, 'error');
-  } finally {
-    btn.disabled = false; btn.textContent = '运行 AI 账户';
+    if (s.last_ok === false) {
+      banner.style.display = "";
+      banner.innerHTML =
+        "❌ <b>上次运行失败</b>(于 " +
+        escapeHtml(time) +
+        "):" +
+        '<span class="muted">' +
+        escapeHtml(s.last_error || "未知错误") +
+        "</span>" +
+        " — 已推送微信提醒,请检查 API Key 或配额。";
+    } else if (s.last_ok === true) {
+      banner.style.display = "";
+      banner.innerHTML =
+        "✅ <b>上次运行成功</b>(于 " + escapeHtml(time) + "),决策已更新。";
+    } else {
+      banner.style.display = "none";
+    }
   }
-});
 
-loadAll();
+  function startAiPolling() {
+    if (aiPollTimer) clearInterval(aiPollTimer);
+    aiPollTimer = setInterval(async () => {
+      try {
+        const s = await fetchJSON("/api/ai-account/status");
+        const btn = document.getElementById("btn-ai-run");
+        if (s.running) {
+          // 运行中:按钮进度条实时刷新
+          const done = s.items_done || 0;
+          const total = s.items_total || 0;
+          setBtnProgress(
+            btn,
+            done,
+            total,
+            total > 0 ? "运行中 " + done + "/" + total : "运行中",
+          );
+          return;
+        }
+        clearInterval(aiPollTimer);
+        aiPollTimer = null;
+        setBtnIdle(btn, "运行 AI 账户");
+        await loadAll();
+        renderRunBanner(s);
+      } catch (e) {}
+    }, 2000);
+  }
+
+  // 按钮 loading 状态:显示 spinner + 文案
+  function setBtnLoading(btn, text) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner spinner-sm"></span>' + text;
+  }
+  // 按钮进度:内嵌进度条按 done/total 填充
+  function setBtnProgress(btn, done, total, text) {
+    btn.disabled = true;
+    btn.classList.add("running");
+    const prog = btn.querySelector(".btn-progress");
+    if (prog) {
+      if (total > 0) {
+        btn.classList.remove("indeterminate");
+        const pct = Math.min(100, Math.round((done / total) * 100));
+        prog.style.width = pct + "%";
+      } else {
+        // 还没拿到总数:走滑动的不确定进度动画
+        btn.classList.add("indeterminate");
+        prog.style.width = "";
+      }
+    }
+    const label = btn.querySelector(".btn-label");
+    if (label)
+      label.innerHTML =
+        '<span class="spinner spinner-sm"></span>' + escapeHtml(text);
+  }
+  function setBtnIdle(btn, text) {
+    btn.disabled = false;
+    btn.classList.remove("running", "indeterminate");
+    const prog = btn.querySelector(".btn-progress");
+    if (prog) prog.style.width = "0%";
+    const label = btn.querySelector(".btn-label");
+    if (label) label.textContent = text;
+    else btn.textContent = text;
+  }
+
+  // ---- 导入我的库存(弹窗多选) ----
+  const seedModal = document.getElementById("seed-modal");
+  const seedList = document.getElementById("seed-list");
+  const seedImportBtn = document.getElementById("seed-import");
+  const seedSelectAll = document.getElementById("seed-select-all");
+
+  function updateSeedBtn() {
+    const n = seedList.querySelectorAll(".pick-check:checked").length;
+    seedImportBtn.disabled = n === 0;
+    seedImportBtn.textContent = "导入选中 (" + n + ")";
+  }
+
+  async function openSeedModal() {
+    try {
+      const r = await fetchJSON("/api/inventory?no-market=1");
+      const items = r.items || [];
+      seedList.innerHTML = "";
+      if (!items.length) {
+        seedList.innerHTML =
+          '<div class="empty">库存为空,没有可导入的饰品</div>';
+        seedImportBtn.disabled = true;
+        seedImportBtn.textContent = "导入选中 (0)";
+        seedModal.style.display = "";
+        return;
+      }
+      for (const it of items) {
+        const el = document.createElement("label");
+        el.className = "scan-cand";
+        el.style.cursor = "pointer";
+        el.innerHTML = `
+        <input type="checkbox" class="pick-check" data-name="${escapeHtml(it.item_name)}" checked style="flex-shrink:0">
+        <div style="min-width:0; flex:1;">
+          <div class="text-sm" style="color:var(--text-1);">${escapeHtml(it.item_name_cn || it.item_name)}</div>
+          <div class="mono text-xs muted truncate">${escapeHtml(it.item_name)}</div>
+        </div>
+        <div class="text-xs muted" style="flex-shrink:0">×${it.shares} · ${fmtMoney(it.buy_price)}</div>`;
+        seedList.appendChild(el);
+      }
+      seedList.querySelectorAll(".scan-cand").forEach((row) => {
+        const cb = row.querySelector(".pick-check");
+        row.addEventListener("click", (e) => {
+          if (e.target.tagName === "INPUT") return;
+          cb.checked = !cb.checked;
+          updateSeedBtn();
+        });
+        cb.addEventListener("change", updateSeedBtn);
+      });
+      updateSeedBtn();
+      seedModal.style.display = "";
+    } catch (e) {
+      showToast(e.message, "error");
+    }
+  }
+
+  seedSelectAll.addEventListener("click", () => {
+    const cbs = seedList.querySelectorAll(".pick-check");
+    const all = Array.from(cbs).every((cb) => cb.checked);
+    cbs.forEach((cb) => {
+      cb.checked = !all;
+    });
+    updateSeedBtn();
+  });
+
+  seedImportBtn.addEventListener("click", async () => {
+    const names = Array.from(
+      seedList.querySelectorAll(".pick-check:checked"),
+    ).map((cb) => cb.dataset.name);
+    if (!names.length) return;
+    seedImportBtn.disabled = true;
+    seedImportBtn.textContent = "导入中...";
+    try {
+      const r = await fetchJSON("/api/ai-account/seed-inventory", {
+        method: "POST",
+        body: JSON.stringify({ items: names }),
+      });
+      if (r.ok) {
+        showToast(
+          "已导入 " +
+            r.seeded +
+            " 个饰品到 AI 持仓(总成本 ¥" +
+            r.total_cost +
+            ")",
+          "success",
+        );
+        seedModal.style.display = "none";
+        await loadAll();
+      } else {
+        showToast(r.error || "导入失败", "error");
+      }
+    } catch (e) {
+      showToast("导入失败: " + e.message, "error");
+    } finally {
+      seedImportBtn.disabled = false;
+      updateSeedBtn();
+    }
+  });
+
+  document.getElementById("seed-close").addEventListener("click", () => {
+    seedModal.style.display = "none";
+  });
+
+  document
+    .getElementById("btn-seed-inventory")
+    .addEventListener("click", openSeedModal);
+
+  document.getElementById("btn-ai-run").addEventListener("click", async () => {
+    const btn = document.getElementById("btn-ai-run");
+    try {
+      // 已在运行:转为轮询,按钮进度条跟随
+      const st = await fetchJSON("/api/ai-account/status");
+      if (st.running) {
+        startAiPolling();
+        return;
+      }
+      // 启动瞬间先给个占位进度,避免无反馈
+      setBtnProgress(btn, 0, 0, "启动中…");
+      const r = await fetchJSON("/api/ai-account/run", {
+        method: "POST",
+        body: "{}",
+      });
+      if (r.ok) {
+        startAiPolling();
+      } else {
+        showToast(r.error || "启动失败", "error");
+        setBtnIdle(btn, "运行 AI 账户");
+      }
+    } catch (e) {
+      showToast("启动失败: " + e.message, "error");
+      setBtnIdle(btn, "运行 AI 账户");
+    }
+  });
+
+  // Initial load: 先秒渲染(无价),再后台预热价格,完成后自动带价刷新
+  loadAll(false).then((r) => {
+    const names = (r && r.holdings ? r.holdings : []).map((h) => h.item_name);
+    warmupPrices(names, () => loadAll(true));
+  });
 </script>
 {% endblock %}

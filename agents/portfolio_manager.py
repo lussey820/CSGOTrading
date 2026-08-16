@@ -8,7 +8,12 @@ from util.logger import logger
 
 # Portfolio Manager Thresholds
 thresholds = {
-    "decision_memory_limit": 5
+    "decision_memory_limit": 5,
+    # 补仓(逢低摊成本)参数
+    "avg_down_min_pnl": -5.0,       # 浮亏达到该值(≤)才允许补仓
+    "avg_down_deep_pnl": -30.0,     # 深亏线:低于该值(≤)视为深亏,补仓额度再减半
+    "avg_down_batch": 1 / 3,        # 正常:单次补仓 = 目标仓位缺口 × 1/3(分批留后手)
+    "avg_down_deep_batch": 1 / 6,   # 深亏:单次补仓 = 目标仓位缺口 × 1/6
 }
 
 # Trading friction assumptions, 2% per trade
@@ -101,6 +106,37 @@ def portfolio_agent(state: FundState):
     nearest_resistance = min(resistances) if resistances else None
     # 破位判断:现价跌破最近支撑位
     broke_support = bool(nearest_support is not None and current_price < nearest_support)
+    # 破位幅度:现价相对支撑位的偏离百分比(负=已跌破)。用于区分真破位 vs 假破位
+    break_pct = (
+        round((current_price - nearest_support) / nearest_support * 100.0, 2)
+        if nearest_support and nearest_support > 0 else 0.0
+    )
+    # 看空信号一致性:看空信号严格多于看多才算共识(中性=弃权/分析失败,不参与)
+    bearish_count = sum(1 for s in signals if s is not None and s.signal.value == "Bearish")
+    bullish_count = sum(1 for s in signals if s is not None and s.signal.value == "Bullish")
+    bearish_consensus = bearish_count > bullish_count
+
+    # 7 天交易 CD:实际可卖份额(买入满 7 天解锁的部分),旧数据无批次视为全部可卖
+    available_shares = pos.available_shares(as_of=str(trading_date)[:10]) if pos else 0
+
+    # 补仓资格(逢低摊成本):结构未破 + 信号未空 + 浮亏达标 + 组合有空间 + 已持仓
+    avg_down_eligible = False
+    avg_down_max_shares = 0
+    if (
+        pos is not None and pos.shares > 0 and avg_cost > 0
+        and floating_pnl_pct <= thresholds["avg_down_min_pnl"]
+        and not broke_support
+        and not bearish_consensus
+        and tradable_shares > 0
+    ):
+        batch = (
+            thresholds["avg_down_deep_batch"]
+            if floating_pnl_pct <= thresholds["avg_down_deep_pnl"]
+            else thresholds["avg_down_batch"]
+        )
+        # 上限 = 目标缺口 × 批次比例(分批留后手);并受底仓守恒约束:补仓 ≤ 已解锁旧仓(可做 T/止损)
+        avg_down_max_shares = max(1, min(int(tradable_shares * batch), pos.shares))
+        avg_down_eligible = True
 
     # make trading decision
     if enable_transaction_fee:
@@ -113,7 +149,12 @@ def portfolio_agent(state: FundState):
             nearest_support=nearest_support,
             nearest_resistance=nearest_resistance,
             broke_support=broke_support,
+            break_pct=break_pct,
+            bearish_consensus=bearish_consensus,
             tradable_shares=tradable_shares,
+            available_shares=available_shares,
+            avg_down_eligible=avg_down_eligible,
+            avg_down_max_shares=avg_down_max_shares,
             transaction_fee_rate=TRANSACTION_FEE_RATE,
             transaction_fee_rate_pct=TRANSACTION_FEE_RATE * 100,
         )
@@ -128,7 +169,12 @@ def portfolio_agent(state: FundState):
             nearest_support=nearest_support,
             nearest_resistance=nearest_resistance,
             broke_support=broke_support,
+            break_pct=break_pct,
+            bearish_consensus=bearish_consensus,
             tradable_shares=tradable_shares,
+            available_shares=available_shares,
+            avg_down_eligible=avg_down_eligible,
+            avg_down_max_shares=avg_down_max_shares,
         )
 
     # Generate the trading decision

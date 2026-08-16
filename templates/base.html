@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}CS2 交易助手{% endblock %}</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/glass.css') }}"
+    />
+    <script>
+      // 主题切换:默认跟随系统,存 localStorage
+      (function () {
+        var saved = null;
+        try {
+          saved = localStorage.getItem("cs2-theme");
+        } catch (e) {}
+        var prefersDark = window.matchMedia(
+          "(prefers-color-scheme: dark)",
+        ).matches;
+        var theme = saved || (prefersDark ? "dark" : "light");
+        document.documentElement.setAttribute("data-theme", theme);
+        window.__theme = theme;
+      })();
+    </script>
+  </head>
+  <body>
+    <nav class="navbar">
+      <div class="navbar-inner">
+        <a
+          href="{{ url_for('inventory_page') }}"
+          class="nav-brand"
+          style="text-decoration: none"
+        >
+          <span class="text-lg" style="font-weight: 800">CS</span>
+          <span style="font-weight: 600; color: var(--text-2)">2 交易助手</span>
+        </a>
+        <div class="nav-links">
+          <a
+            href="{{ url_for('watchlist_page') }}"
+            class="nav-link {% if request.endpoint == 'watchlist_page' %}active{% endif %}"
+            >关注列表</a
+          >
+          <a
+            href="{{ url_for('inventory_page') }}"
+            class="nav-link {% if request.endpoint in ['dashboard', 'inventory_page'] %}active{% endif %}"
+            >我的库存</a
+          >
+          <a
+            href="{{ url_for('today_advisor_page') }}"
+            class="nav-link {% if request.endpoint == 'today_advisor_page' %}active{% endif %}"
+            >今日建议</a
+          >
+          <a
+            href="{{ url_for('ai_trader_page') }}"
+            class="nav-link {% if request.endpoint == 'ai_trader_page' %}active{% endif %}"
+            >AI持仓</a
+          >
+          <a
+            href="{{ url_for('comparison_page') }}"
+            class="nav-link {% if request.endpoint == 'comparison_page' %}active{% endif %}"
+            >决策对照</a
+          >
+          <a
+            href="{{ url_for('positions_page') }}"
+            class="nav-link {% if request.endpoint == 'positions_page' %}active{% endif %}"
+            >持仓与净值</a
+          >
+          <a
+            href="{{ url_for('settings_page') }}"
+            class="nav-link {% if request.endpoint == 'settings_page' %}active{% endif %}"
+            >API 设置</a
+          >
+        </div>
+        <div class="nav-actions">
+          <button
+            id="theme-toggle"
+            class="theme-toggle"
+            title="切换深浅模式"
+            aria-label="切换主题"
+          >
+            ☾
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <main class="container page">{% block content %}{% endblock %}</main>
+
+    <script>
+      // 主题切换
+      (function () {
+        var btn = document.getElementById("theme-toggle");
+        function updateIcon() {
+          btn.textContent =
+            document.documentElement.getAttribute("data-theme") === "dark"
+              ? "☀"
+              : "☾";
+        }
+        updateIcon();
+        btn.addEventListener("click", function () {
+          var cur =
+            document.documentElement.getAttribute("data-theme") || "light";
+          var next = cur === "dark" ? "light" : "dark";
+          document.documentElement.setAttribute("data-theme", next);
+          try {
+            localStorage.setItem("cs2-theme", next);
+          } catch (e) {}
+          window.__theme = next;
+          updateIcon();
+        });
+      })();
+
+      // Toast
+      function showToast(message, type) {
+        type = type || "info";
+        var cls =
+          {
+            info: "toast-info",
+            success: "toast-success",
+            error: "toast-error",
+          }[type] || "toast-info";
+        var el = document.createElement("div");
+        el.className = "toast " + cls;
+        el.textContent = message;
+        document.body.appendChild(el);
+        setTimeout(function () {
+          el.remove();
+        }, 3000);
+      }
+
+      async function fetchJSON(url, options) {
+        options = options || {};
+        var res = await fetch(url, {
+          headers: { "Content-Type": "application/json" },
+          ...options,
+        });
+        var data = {};
+        try {
+          data = await res.json();
+        } catch (e) {}
+        if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
+        return data;
+      }
+
+      // 后台预热价格:首次进入页面先秒渲染(无价),后台逐个抓价写缓存,
+      // 轮询 /api/prices/status 直到完成,再回调 onDone() 让页面带价重载。
+      function warmupPrices(names, onDone, onProgress) {
+        var unique = [];
+        (names || []).forEach(function (n) {
+          if (n && unique.indexOf(n) === -1) unique.push(n);
+        });
+        if (!unique.length) {
+          if (onDone) onDone();
+          return;
+        }
+        fetchJSON("/api/prices/warmup", {
+          method: "POST",
+          body: JSON.stringify({ names: unique }),
+        })
+          .then(function (r) {
+            if (onProgress) onProgress(r.status);
+            // 最多轮询 10 分钟,防止服务异常导致永久阻塞
+            var maxPolls = 600;
+            var timer = setInterval(function () {
+              fetchJSON("/api/prices/status")
+                .then(function (s) {
+                  if (onProgress) onProgress(s);
+                  if (!s.running || --maxPolls <= 0) {
+                    clearInterval(timer);
+                    if (onDone) onDone();
+                  }
+                })
+                .catch(function () {
+                  clearInterval(timer);
+                  if (onDone) onDone();
+                });
+            }, 1000);
+          })
+          .catch(function () {
+            if (onDone) onDone();
+          });
+      }
+
+      function fmtMoney(v) {
+        if (v == null || v === "") return "-";
+        if (typeof v !== "number") v = parseFloat(v) || 0;
+        return "¥" + v.toFixed(2);
+      }
+      function fmtPct(v) {
+        if (v == null || v === "") return "-";
+        if (typeof v !== "number") v = parseFloat(v) || 0;
+        return (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
+      }
+      function colorClass(v) {
+        if (v == null) return "muted";
+        return v >= 0 ? "up" : "down";
+      }
+      function escapeHtml(s) {
+        return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+          return {
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
+          }[c];
+        });
+      }
+    </script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

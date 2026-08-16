@@ -10,7 +10,7 @@ class LLMConfig:
     """Configuration for LLM inference"""
     provider: str
     model: str
-    temperature: float = 0.5
+    temperature: float = 0.1  # 决策分析需确定性优先,降温度减少随机摇摆
     max_retries: int = 3
 
 

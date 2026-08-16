@@ -25,6 +25,27 @@ from util.logger import logger
 
 TRANSACTION_FEE_RATE = 0.02  # 2% sell fee (matches portfolio_manager.py)
 
+# Steam 市场 7 天交易 CD
+_TRADING_CD_DAYS = 7
+
+
+def _available_shares(pos: Dict, shares: int) -> int:
+    """7 天 CD 后可卖份额:买入满 7 天的批次合计;无批次(旧数据)视为全部可卖。"""
+    lots = pos.get("lots") or []
+    if not lots:
+        return shares
+    try:
+        from datetime import datetime, timedelta
+        cutoff = (datetime.now() - timedelta(days=_TRADING_CD_DAYS)).strftime("%Y-%m-%d")
+    except Exception:
+        return shares
+    available = sum(
+        int(l.get("shares") or 0)
+        for l in lots
+        if str(l.get("date") or "")[:10] <= cutoff
+    )
+    return min(available, shares)
+
 
 def _conn():
     conn = sqlite3.connect(CS2_DB_PATH)
@@ -174,8 +195,12 @@ def auto_settle_sell(
 
 # ----------------- query AI trader state -----------------
 
-def _virtual_holdings() -> List[Dict]:
+def _virtual_holdings(on_progress=None, with_market: bool = True) -> List[Dict]:
     """读 AI 虚拟账户(exp_name=ai-account)最新持仓,拉实时价算未实现盈亏。
+
+    Args:
+        on_progress: 可选回调,每完成一个饰品价格抓取时调用 on_progress(item_name)。
+        with_market: False 时不抓实时价(current_price/unrealized 为 None),秒回。
 
     返回元素:item_name, item_name_cn, shares, buy_price(=avg_cost),
     current_price, unrealized_pnl, unrealized_pnl_pct。
@@ -208,22 +233,34 @@ def _virtual_holdings() -> List[Dict]:
         if shares <= 0:
             continue
         avg_cost = float(pos.get("avg_cost") or 0.0)
+        # 7 天交易 CD 后可卖份额:无批次(旧数据)视为全部可卖
+        available = _available_shares(pos, shares)
         cur = None
-        try:
-            md = fetch_item_market_data(name)
-            cur = _extract_current_price(md)
-        except Exception as e:
-            logger.error(f"ai_trader: price fetch failed for {name}: {e}")
-        unreal = round((cur - avg_cost) * shares, 2) if cur is not None else None
+        if with_market:
+            try:
+                md = fetch_item_market_data(name)
+                cur = _extract_current_price(md)
+            except Exception as e:
+                logger.error(f"ai_trader: price fetch failed for {name}: {e}")
+        if on_progress:
+            try:
+                on_progress(name)
+            except Exception:
+                pass
+        unreal = (
+            round((cur - avg_cost) * shares, 2)
+            if cur is not None and with_market else None
+        )
         unreal_pct = (
             round((cur - avg_cost) / avg_cost * 100.0, 2)
-            if cur is not None and avg_cost > 0 else None
+            if cur is not None and with_market and avg_cost > 0 else None
         )
         holdings.append(
             {
                 "item_name": name,
                 "item_name_cn": name,
                 "shares": shares,
+                "available_shares": available,
                 "buy_price": avg_cost,
                 "current_price": cur,
                 "unrealized_pnl": unreal,
@@ -238,8 +275,12 @@ def _virtual_holdings() -> List[Dict]:
     return holdings
 
 
-def get_ai_trader_summary() -> Dict:
-    """Return the AI trader overview: per-item trades + cumulative P&L."""
+def get_ai_trader_summary(with_market: bool = True) -> Dict:
+    """Return the AI trader overview: per-item trades + cumulative P&L.
+
+    Args:
+        with_market: False 时持仓不抓实时价(current_price/unrealized 为 None),秒回。
+    """
     try:
         with _conn() as conn:
             trades = conn.execute(
@@ -314,15 +355,21 @@ def get_ai_trader_summary() -> Dict:
     per_item_list = sorted(per_item.values(), key=lambda x: x["item_name"])
 
     # AI 虚拟账户持仓 + 未实现盈亏(虚拟账户,非真实库存)
-    holdings = _virtual_holdings()
-    total_unrealized = 0.0
-    for h in holdings:
-        total_unrealized += h["unrealized_pnl"] or 0.0
+    holdings = _virtual_holdings(with_market=with_market)
+    if with_market:
+        total_unrealized = round(
+            sum((h["unrealized_pnl"] or 0.0) for h in holdings), 2
+        )
+        total_pnl = round(total_realized + total_unrealized, 2)
+    else:
+        # no-market:未实现盈亏未知,总盈亏只含已实现部分
+        total_unrealized = None
+        total_pnl = round(total_realized, 2)
 
     return {
         "total_realized_pnl": round(total_realized, 2),
-        "total_unrealized_pnl": round(total_unrealized, 2),
-        "total_pnl": round(total_realized + total_unrealized, 2),
+        "total_unrealized_pnl": total_unrealized,
+        "total_pnl": total_pnl,
         "total_fee_paid": round(total_fee, 2),
         "trade_count": len(trade_list),
         "per_item": per_item_list,
