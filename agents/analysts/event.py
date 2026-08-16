@@ -33,14 +33,13 @@ def event_agent(state: FundState):
 
     logger.log_agent_status(agent_name, ticker, "Analyzing Steam official news and events")
 
-    # Load Steam news via Router (historical CSV, 7-day window)
+    # 实时 CS2 应用级新闻(GetNewsForApp,免 key):官方更新/活动/新箱子等,
+    # 由 LLM 结合 ticker 判断这些事件对当前饰品价格的影响
     router = Router(APISource.STEAM)
     try:
-        steam_news = router.get_steam_historical_news(
-            ticker=ticker,
-            trading_date=trading_date,
-            window_days=7,
-            limit=thresholds["steam_limit"],
+        steam_news = router.get_steam_app_news(
+            count=thresholds["steam_limit"],
+            maxlength=300,
         )
     except Exception as e:
         logger.error(f"Failed to fetch Steam news for {ticker} on {trading_date}: {e}")

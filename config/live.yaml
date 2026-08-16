@@ -6,10 +6,12 @@ cashflow: 10000
 # tickers 由 daily.py 从 config/watchlist.yaml 动态注入到临时配置
 tickers: []
 
-# 技术分析 + 视觉K线图分析（SteamDT 截图 → qwen-vl-plus）
+# 技术分析 + 视觉K线图分析(SteamDT 截图 → qwen-vl-plus)+ Reddit 情绪 + Steam 实时事件
 workflow_analysts:
   - technical
   - vision
+  - sentiment
+  - event
 
 llm:
   provider: "DeepSeek"

@@ -102,9 +102,15 @@ cp .env.example .env
 | `PUSH_PROVIDER` | 推送渠道:`serverchan` 或 `pushplus` | 选一个即可 |
 | `PUSH_TOKEN` | Server酱 sendkey 或 pushplus token | 对应平台获取 |
 | `QWEN_API_KEY` | 视觉分析模型(qwen-vl-plus) | 阿里云百炼 |
+| `REDDIT_CLIENT_ID` | Reddit 情绪分析(可选) | https://www.reddit.com/prefs/apps 创建 script 应用 |
+| `REDDIT_CLIENT_SECRET` | 同上 | 同上 |
+| `REDDIT_USER_AGENT` | 同上(任意标识串) | 同上 |
 
-> 视觉分析(K 线截图解读)依赖 `QWEN_API_KEY`;没有它分析会退化为纯技术分析。
-> 其它 provider(OpenAI/Kimi/AIHubMix/YiZhan)可选用,需在 `config/live.yaml` 中切换。
+> **分析师配置**(`config/live.yaml` 的 `workflow_analysts`):
+> - `technical` + `vision`:基础,视觉依赖 `QWEN_API_KEY`
+> - `sentiment`:Reddit 社区情绪,**需配置 REDDIT 三个变量**;饰品相关帖子少时可能输出中性
+> - `event`:Steam 官方新闻(更新/活动/新箱子,免 key),判断对饰品价格的影响
+> - 每多一个分析师,每个饰品多一次 LLM 调用,分析耗时相应增加
 
 ### 3. 配置关注列表
 
